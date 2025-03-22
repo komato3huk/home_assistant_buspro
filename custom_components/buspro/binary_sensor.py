@@ -172,11 +172,6 @@ class BusproBinarySensor(BinarySensorEntity):
         return self._device.device_identifier
 
     @property
-    def entity_id(self):
-        """Return the entity ID for this binary sensor."""
-        return f"binary_sensor.binary_sensor_{self._device.device_identifier}_{self._sensor_type}"
-
-    @property
     def is_on(self):
         """Return true if the binary sensor is on."""
         if self._sensor_type == CONF_MOTION:

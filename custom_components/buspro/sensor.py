@@ -181,8 +181,3 @@ class BusproSensor(SensorEntity):
     def unique_id(self) -> str:
         """Return a unique ID."""
         return f"sensor_{self._subnet_id}_{self._device_id}_{self._sensor_type}"
-
-    @property
-    def entity_id(self) -> str:
-        """Return the entity ID for this sensor."""
-        return f"sensor.sensor_{self._subnet_id}_{self._device_id}_{self._sensor_type}"

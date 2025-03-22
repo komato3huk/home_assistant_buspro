@@ -156,9 +156,4 @@ class BusproCover(CoverEntity):
     @property
     def unique_id(self) -> str:
         """Return a unique ID."""
-        return f"cover_{self._subnet_id}_{self._device_id}"
-
-    @property
-    def entity_id(self) -> str:
-        """Return the entity ID for this cover."""
-        return f"cover.cover_{self._subnet_id}_{self._device_id}" 
+        return f"cover_{self._subnet_id}_{self._device_id}" 
