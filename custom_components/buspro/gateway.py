@@ -36,12 +36,16 @@ class BusproGateway:
         discovery: BusproDiscovery,
         port: int = 10000,
         poll_interval: int = 30,
+        gateway_host: str = "255.255.255.255",
+        gateway_port: int = 6000,
     ) -> None:
         """Initialize the gateway."""
         self.hass = hass
         self.discovery = discovery
         self.port = port
         self.poll_interval = poll_interval
+        self.gateway_host = gateway_host
+        self.gateway_port = gateway_port
         self._callbacks = {}
         self._polling_task = None
         self._running = False
@@ -238,7 +242,7 @@ class BusproGateway:
                         _LOGGER.error(f"Ошибка при опросе устройства {device_key}: {ex}")
                 
                 # Обновляем время последнего обновления
-                self._last_update = dt_util.utcnow()
+                self._last_update = time.time()
                 
                 # Ждем до следующего опроса
                 await asyncio.sleep(interval.total_seconds())
@@ -334,3 +338,68 @@ class BusproGateway:
         except Exception as ex:
             _LOGGER.error(f"Ошибка при отправке команды: {ex}")
             return False 
+
+    async def send_telegram(self, telegram):
+        """Send a telegram to the HDL Buspro bus."""
+        try:
+            if not telegram:
+                _LOGGER.error("Невозможно отправить пустую телеграмму")
+                return None
+                
+            # Извлекаем данные из телеграммы
+            subnet_id = telegram.get("subnet_id")
+            device_id = telegram.get("device_id")
+            operate_code = telegram.get("operate_code")
+            data = telegram.get("data", [])
+            
+            if subnet_id is None or device_id is None or operate_code is None:
+                _LOGGER.error("В телеграмме отсутствуют обязательные поля")
+                return None
+                
+            # Отправляем команду с использованием send_hdl_command
+            # Для кода операции (2 байта) делим на старший и младший байт
+            op_high = (operate_code >> 8) & 0xFF
+            op_low = operate_code & 0xFF
+            
+            # Формируем заголовок HDL сообщения
+            header = bytearray([0x48, 0x44, 0x4C, 0x4D, 0x49, 0x52, 0x41, 0x43, 0x4C, 0x45, 0x42, 0x45, 0x41])
+            
+            # Подготавливаем команду
+            command = bytearray([
+                0x00,  # Наш subnet_id (всегда 0 для контроллера)
+                subnet_id,  # Subnet ID получателя
+                0x01,  # Наш device ID (всегда 1 для контроллера)
+                device_id,  # Device ID получателя
+                op_high,  # Старший байт кода операции
+                op_low   # Младший байт кода операции
+            ])
+            
+            # Добавляем дополнительные данные
+            if data:
+                if isinstance(data, list):
+                    command.extend(data)
+                else:
+                    command.append(data)
+            
+            # Формируем полное сообщение
+            message = header + command
+            
+            # Отправляем сообщение
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            
+            target_ip = self.gateway_host if hasattr(self, 'gateway_host') else "255.255.255.255"
+            target_port = self.gateway_port if hasattr(self, 'gateway_port') else 6000
+            
+            sock.sendto(message, (target_ip, target_port))
+            _LOGGER.debug(f"Отправлена телеграмма для {subnet_id}.{device_id}, код операции: 0x{operate_code:04X}, данные: {data}")
+            
+            sock.close()
+            
+            # Возвращаем успешный результат с эмуляцией ответа
+            # В реальной реализации здесь должно быть ожидание ответа от устройства
+            return {"success": True, "data": data}
+            
+        except Exception as ex:
+            _LOGGER.error(f"Ошибка при отправке телеграммы: {ex}")
+            return None 

@@ -141,58 +141,57 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up HDL Buspro from a config entry."""
-    _LOGGER.info("Настройка интеграции HDL Buspro")
-    
-    # Извлекаем данные конфигурации
-    host = entry.data[CONF_HOST]
-    port = entry.data[CONF_PORT]
+    # Получаем конфигурационные параметры
+    host = entry.data.get(CONF_HOST, "255.255.255.255")
+    port = entry.data.get(CONF_PORT, 10000)
     timeout = entry.data.get(CONF_TIMEOUT, DEFAULT_TIMEOUT)
     device_subnet_id = entry.data.get(CONF_DEVICE_SUBNET_ID, DEFAULT_DEVICE_SUBNET_ID)
     device_id = entry.data.get(CONF_DEVICE_ID, DEFAULT_DEVICE_ID)
     poll_interval = entry.data.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
     gateway_host = entry.data.get(CONF_GATEWAY_HOST, host)
-    gateway_port = entry.data.get(CONF_GATEWAY_PORT, 6000)
+    gateway_port = entry.data.get(CONF_GATEWAY_PORT, DEFAULT_GATEWAY_PORT)
     
-    # Создаем объект обнаружения устройств
+    # Создаем модуль обнаружения устройств
     discovery = BusproDiscovery(
-        hass, 
+        hass,
         gateway_host=gateway_host,
         gateway_port=gateway_port,
         device_subnet_id=device_subnet_id,
-        device_id=device_id
+        device_id=device_id,
     )
     
-    # Создаем объект шлюза
-    gateway = BusproGateway(hass, discovery, port, poll_interval)
-    
-    # Запускаем обнаружение устройств
-    _LOGGER.info(f"Начинаю поиск устройств HDL Buspro на {host}:{port}")
-    await discovery.discover_devices()
+    # Создаем шлюз
+    gateway = BusproGateway(
+        hass,
+        discovery,
+        port=port,
+        poll_interval=poll_interval,
+        gateway_host=gateway_host,
+        gateway_port=gateway_port,
+    )
     
     # Запускаем шлюз
     await gateway.start()
     
-    # Сохраняем объекты в hass.data для использования в платформах
-    hass.data.setdefault(DOMAIN, {})
+    # Запускаем обнаружение устройств
+    await discovery.discover_devices()
+    
+    # Сохраняем объекты в hass.data
+    if DOMAIN not in hass.data:
+        hass.data[DOMAIN] = {}
+        
     hass.data[DOMAIN][entry.entry_id] = {
         "gateway": gateway,
         "discovery": discovery,
     }
     
-    # Настраиваем периодическое обновление устройств
-    async def async_update_devices(now=None):
-        """Обновление состояния устройств."""
-        await discovery.discover_devices()
-    
-    # Запускаем обновление каждые poll_interval минут
-    async_track_time_interval(
-        hass, 
-        async_update_devices, 
-        timedelta(minutes=5)  # Обнаружение устройств раз в 5 минут
+    # Регистрируем платформы
+    await hass.config_entries.async_forward_entry_setups(
+        entry, ["light", "switch", "cover", "climate", "sensor", "binary_sensor"]
     )
     
-    # Запускаем платформы
-    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    # Регистрируем функцию для выгрузки entry
+    entry.async_on_unload(entry.add_update_listener(_update_listener))
     
     return True
 
@@ -218,6 +217,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.info("Интеграция HDL Buspro успешно выгружена")
     
     return unload_ok
+
+async def _update_listener(hass: HomeAssistant, entry: ConfigEntry):
+    """Handle options update."""
+    await hass.config_entries.async_reload(entry.entry_id)
 
 class BusproModule:
     """Representation of Buspro Object."""

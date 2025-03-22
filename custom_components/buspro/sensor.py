@@ -96,7 +96,7 @@ async def async_setup_entry(
     entities = []
     
     # Получаем сенсоры из обнаруженных устройств
-    for device in discovery.get_devices_by_type(SENSOR):
+    for device in discovery.get_devices_by_type("sensor"):
         subnet_id = device["subnet_id"]
         device_id = device["device_id"]
         
