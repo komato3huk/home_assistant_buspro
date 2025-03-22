@@ -94,7 +94,7 @@ class BusproLight(LightEntity):
             """Call after device was updated."""
             self.async_write_ha_state()
 
-        self._gateway.register_device_updated_cb(after_update_callback)
+        self._gateway.register_callback(after_update_callback)
 
     @property
     def should_poll(self):

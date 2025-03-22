@@ -85,6 +85,8 @@ class BusproClimate(ClimateEntity):
         self._target_temperature = None
         self._current_temperature = None
         self._fan_mode = None
+        self._attr_target_temperature_high = None
+        self._attr_target_temperature_low = None
         
         # Default values
         self._min_temp = 16
@@ -120,6 +122,16 @@ class BusproClimate(ClimateEntity):
     def target_temperature(self) -> Optional[float]:
         """Return the temperature we try to reach."""
         return self._target_temperature
+
+    @property
+    def target_temperature_high(self) -> Optional[float]:
+        """Return the upper bound target temperature we try to reach."""
+        return self._attr_target_temperature_high
+
+    @property
+    def target_temperature_low(self) -> Optional[float]:
+        """Return the lower bound target temperature we try to reach."""
+        return self._attr_target_temperature_low
 
     @property
     def target_temperature_step(self) -> float:
@@ -170,6 +182,26 @@ class BusproClimate(ClimateEntity):
             )
             self._target_temperature = temperature
             self.async_write_ha_state()
+        elif ATTR_TARGET_TEMP_HIGH in kwargs or ATTR_TARGET_TEMP_LOW in kwargs:
+            high = kwargs.get(ATTR_TARGET_TEMP_HIGH)
+            low = kwargs.get(ATTR_TARGET_TEMP_LOW)
+            
+            # Update the target temperature range
+            if high is not None:
+                self._attr_target_temperature_high = high
+            if low is not None:
+                self._attr_target_temperature_low = low
+                
+            # Send the average as the target temperature to the device
+            if high is not None and low is not None:
+                avg_temp = (high + low) / 2
+                await self._gateway.send_message(
+                    [self._subnet_id, self._device_id],
+                    [OPERATION_SINGLE_CHANNEL],
+                    [1, int(avg_temp * 10)]
+                )
+            
+            self.async_write_ha_state()
 
     async def async_set_hvac_mode(self, hvac_mode: str) -> None:
         """Set new target hvac mode."""
@@ -216,6 +248,11 @@ class BusproClimate(ClimateEntity):
                 # Temperature comes as integer (multiplied by 10)
                 self._current_temperature = temp_response[0] / 10
                 self._target_temperature = temp_response[1] / 10 if len(temp_response) > 1 else None
+                
+                # Set temperature range if target temperature is available
+                if self._target_temperature is not None:
+                    self._attr_target_temperature_high = self._target_temperature + 1
+                    self._attr_target_temperature_low = self._target_temperature - 1
                 
                 # Update mode and action
                 hdl_mode = mode_response[0]
