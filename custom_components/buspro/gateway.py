@@ -195,21 +195,24 @@ class BusproGateway:
             _LOGGER.info(f"Отправка команды 0x{op_code_int:04X} для устройства {subnet_id}.{device_id} через шлюз {self.gateway_host}:{self.gateway_port}")
             _LOGGER.debug(f"Сообщение: {message.hex()}")
             
-            # Отправляем сообщение через UDP
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            
-            sock.sendto(message, (self.gateway_host, self.gateway_port))
-            _LOGGER.debug(f"Сообщение отправлено")
-            
-            # Ждем ответа - STUB, в реальной имплементации здесь должно быть ожидание ответа
-            # с соответствующим timeout
-            await asyncio.sleep(0.1)
-            
-            sock.close()
-            
-            # Возвращаем заглушку с данными
-            return data
+            # Проверяем, что UDP клиент инициализирован
+            if not self._udp_client:
+                _LOGGER.error("UDP клиент не инициализирован. Не могу отправить сообщение.")
+                return None
+                
+            try:
+                # Отправляем сообщение через UDP клиент
+                await self._udp_client.send(message, self.gateway_host, self.gateway_port)
+                _LOGGER.debug(f"Сообщение успешно отправлено на {self.gateway_host}:{self.gateway_port}")
+                
+                # Ждем небольшую паузу перед продолжением
+                await asyncio.sleep(0.1)
+                
+                # Возвращаем данные
+                return data
+            except Exception as ex:
+                _LOGGER.error(f"Ошибка при отправке сообщения через UDP клиент: {ex}")
+                return None
             
         except Exception as ex:
             _LOGGER.error(f"Ошибка при отправке сообщения: {ex}")
@@ -386,16 +389,21 @@ class BusproGateway:
     def send_hdl_command(self, subnet_id, device_id, operation, data=None):
         """Отправка команды HDL устройству."""
         try:
+            # Проверяем, что UDP клиент инициализирован
+            if not self._udp_client:
+                _LOGGER.error("UDP клиент не инициализирован. Не могу отправить команду.")
+                return False
+                
             # Формируем заголовок HDL сообщения
             header = bytearray([0x48, 0x44, 0x4C, 0x4D, 0x49, 0x52, 0x41, 0x43, 0x4C, 0x45, 0x42, 0x45, 0x41])
             
             # Подготавливаем данные команды
             command = bytearray([
-                0x00,  # Предполагаем, что наш subnet всегда 0 для отправителя
-                subnet_id,  # Subnet ID получателя
-                0x01,  # Предполагаем, что наш device ID всегда 1 для отправителя
-                device_id,  # Device ID получателя
-                operation  # Код операции
+                self.device_subnet_id,  # Наш subnet ID для отправителя
+                subnet_id,              # Subnet ID получателя
+                self.device_id,         # Наш device ID для отправителя
+                device_id,              # Device ID получателя
+                operation               # Код операции
             ])
             
             # Добавляем дополнительные данные, если они есть
@@ -408,24 +416,18 @@ class BusproGateway:
             # Формируем полное сообщение
             message = header + command
             
-            # Отправляем сообщение через UDP
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            # Отправляем сообщение через UDP клиент
+            target_host = self.gateway_host
+            target_port = self.gateway_port
             
-            # Отправляем на широковещательный адрес или конкретный IP
-            target_ip = "255.255.255.255"  # Можно изменить на конкретный IP устройства
-            target_port = 6000  # Стандартный порт HDL Buspro
+            _LOGGER.debug(f"Отправка команды {operation:02x} для {subnet_id}.{device_id} на {target_host}:{target_port}: {message.hex()}")
             
-            sock.sendto(message, (target_ip, target_port))
-            
-            _LOGGER.debug(f"Отправлена команда {operation:02x} для {subnet_id}.{device_id}: {message.hex()}")
-            
-            sock.close()
+            self.hass.async_create_task(self._udp_client.send(message, target_host, target_port))
             return True
             
         except Exception as ex:
             _LOGGER.error(f"Ошибка при отправке команды: {ex}")
-            return False 
+            return False
 
     async def send_telegram(self, telegram):
         """Send a telegram to the HDL Buspro bus."""
@@ -545,15 +547,21 @@ class BusproGateway:
                 # Получаем тип устройства из данных (первые два байта)
                 device_type = (telegram["data"][0] << 8) | telegram["data"][1]
                 _LOGGER.info(f"Обнаружено устройство HDL: подсеть {source_subnet_id}, ID {source_device_id}, тип 0x{device_type:04X}")
+                _LOGGER.debug(f"Данные обнаружения: {telegram['data']}")
+                
+                # Вывести дополнительную информацию о типе устройства
+                device_info = {
+                    "subnet_id": source_subnet_id,
+                    "device_id": source_device_id,
+                    "device_type": device_type,
+                    "raw_data": telegram["data"],
+                    "receive_time": time.time(),
+                    "source_address": addr
+                }
+                _LOGGER.info(f"Детали устройства HDL: {device_info}")
                 
                 # Добавляем устройство в список для discovery
                 if self.discovery_callback:
-                    device_info = {
-                        "subnet_id": source_subnet_id,
-                        "device_id": source_device_id,
-                        "device_type": device_type,
-                        "raw_data": telegram["data"],
-                    }
                     await self.discovery_callback(device_info)
             
             # Обрабатываем ответы на запросы

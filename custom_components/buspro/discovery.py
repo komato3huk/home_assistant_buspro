@@ -77,11 +77,13 @@ class BusproDiscovery:
 
     async def discover_devices(self, subnet_id: int = None, timeout: int = 5) -> Dict[str, List[Dict[str, Any]]]:
         """Discover HDL Buspro devices."""
-        # Если subnet_id не указан, используем стандартную подсеть 1
+        # Если subnet_id не указан, сканируем несколько подсетей
         if subnet_id is None:
-            subnet_id = 1
-
-        _LOGGER.info(f"Начинаем поиск устройств HDL Buspro в подсети {subnet_id}...")
+            subnets_to_scan = list(range(1, 21))  # Сканируем подсети от 1 до 20
+            _LOGGER.info(f"Начинаем поиск устройств HDL Buspro в подсетях 1-20...")
+        else:
+            subnets_to_scan = [subnet_id]
+            _LOGGER.info(f"Начинаем поиск устройств HDL Buspro в подсети {subnet_id}...")
 
         # Очищаем предыдущие результаты обнаружения
         for device_type in self.devices:
@@ -92,11 +94,6 @@ class BusproDiscovery:
         
         # Запускаем реальное обнаружение устройств
         try:
-            # Отправляем запрос обнаружения для каждой подсети
-            # Если указана конкретная подсеть, то только для неё
-            # Иначе перебираем все подсети от 1 до 10 (чтобы не перегружать сеть)
-            subnets_to_scan = [subnet_id] if subnet_id else list(range(1, 11))
-            
             _LOGGER.info(f"Сканирование подсетей: {subnets_to_scan}")
             
             # Отправляем запросы на обнаружение во все подсети
@@ -327,7 +324,7 @@ class BusproDiscovery:
             data = []
 
             # Отправляем запрос на сеть
-            _LOGGER.debug(f"Отправка запроса обнаружения для подсети {subnet_id}")
+            _LOGGER.debug(f"Отправка запроса обнаружения для подсети {subnet_id} на широковещательный адрес")
             result = await self.gateway.send_message(
                 [subnet_id, 0xFF, 0, 0],  # target_address - broadcast для всей подсети
                 [operate_code >> 8, operate_code & 0xFF],  # операция обнаружения

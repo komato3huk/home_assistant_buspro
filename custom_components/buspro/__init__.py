@@ -178,7 +178,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass=hass,
         gateway_host=host,
         gateway_port=gateway_port,
-        broadcast_address=host,
+        broadcast_address="255.255.255.255",
         device_subnet_id=device_subnet_id,
         device_id=device_id,
     )
