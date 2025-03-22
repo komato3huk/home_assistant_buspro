@@ -64,8 +64,11 @@ class BusproGateway:
         # Флаг работы шлюза
         self._running = False
         
+        # Время последнего обновления
+        self._last_update = 0
+        
         # Коллбеки и обработчики
-        self._message_callbacks = {}
+        self._callbacks = {}
         self._message_listeners = []
         self.discovery_callback = None
 
@@ -87,7 +90,7 @@ class BusproGateway:
             )
             
             # Регистрируем обработчики
-            self._message_callbacks = {}
+            self._callbacks = {}
             self._message_listeners = []
             
             # Запускаем UDP клиент
@@ -554,9 +557,9 @@ class BusproGateway:
                     await self.discovery_callback(device_info)
             
             # Обрабатываем ответы на запросы
-            if self._message_callbacks:
+            if self._callbacks:
                 # Берем копию словаря для безопасного итерирования
-                callbacks_copy = self._message_callbacks.copy()
+                callbacks_copy = self._callbacks.copy()
                 for callback_key, callback_info in callbacks_copy.items():
                     try:
                         callback_subnet_id, callback_device_id, callback_operate_code = callback_key
@@ -574,7 +577,7 @@ class BusproGateway:
                                 timeout_handle.cancel()
                                 
                             # Удаляем callback из словаря
-                            self._message_callbacks.pop(callback_key, None)
+                            self._callbacks.pop(callback_key, None)
                             
                             # Вызываем callback
                             if callback:
@@ -652,13 +655,13 @@ class BusproGateway:
             )
             
             # Регистрируем callback
-            self._message_callbacks[callback_key] = (handle_response, future, timeout_handle)
+            self._callbacks[callback_key] = (handle_response, future, timeout_handle)
             
             # Отправляем сообщение
             buffer = self.telegram_helper.build_send_buffer(telegram)
             if not buffer:
                 _LOGGER.error(f"Не удалось создать буфер отправки для телеграммы: {telegram}")
-                self._message_callbacks.pop(callback_key, None)
+                self._callbacks.pop(callback_key, None)
                 if timeout_handle:
                     timeout_handle.cancel()
                 return None
@@ -681,7 +684,7 @@ class BusproGateway:
     def _handle_timeout(self, callback_key, future):
         """Handle timeout for message response."""
         # Удаляем callback
-        self._message_callbacks.pop(callback_key, None)
+        self._callbacks.pop(callback_key, None)
         
         # Устанавливаем результат как таймаут, если future еще не выполнен
         if not future.done():
