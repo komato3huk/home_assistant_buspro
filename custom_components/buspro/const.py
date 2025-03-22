@@ -1,7 +1,12 @@
 """Constants for the HDL Buspro integration."""
 
+import logging
+from datetime import timedelta
+
 DOMAIN = "buspro"
 DEFAULT_NAME = "HDL Buspro"
+
+LOGGER = logging.getLogger(__package__)
 
 # Конфигурационные параметры
 CONF_DEVICE_SUBNET_ID = "device_subnet_id"
@@ -9,6 +14,8 @@ CONF_DEVICE_ID = "device_id"
 CONF_POLL_INTERVAL = "poll_interval"
 CONF_GATEWAY_HOST = "gateway_host"
 CONF_GATEWAY_PORT = "gateway_port"
+CONF_TIMEOUT = "timeout"
+CONF_GATEWAY_NAME = "gateway_name"
 
 # Значения по умолчанию
 DEFAULT_PORT = 10000
@@ -117,3 +124,6 @@ SENSOR_TYPE_STRINGS = {
 ATTR_BRIGHTNESS = "brightness"
 ATTR_POSITION = "position"
 ATTR_TEMPERATURE = "temperature"
+
+# Preset modes
+CONF_PRESET_MODES = "preset_modes"

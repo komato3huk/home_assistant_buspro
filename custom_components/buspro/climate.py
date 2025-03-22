@@ -7,6 +7,7 @@ https://home-assistant.io/components/...
 
 import logging
 from typing import Any, Dict, List, Optional, Set
+from datetime import timedelta
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
@@ -34,32 +35,28 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
-from .const import DOMAIN, OPERATION_READ_STATUS, CLIMATE
+from .const import DOMAIN, OPERATION_READ_STATUS, CLIMATE, CONF_PRESET_MODES
 
 _LOGGER = logging.getLogger(__name__)
 
-CONF_PRESET_MODES = "preset_modes"
+# Константы для работы с климат-контроллером
+DEFAULT_MIN_TEMP = 5
+DEFAULT_MAX_TEMP = 40
 
-# Маппинг между режимами Home Assistant и режимами HDL Buspro
-HVAC_MODES_MAP = {
-    HVACMode.OFF: 0x00,
-    HVACMode.HEAT: 0x01,
-    HVACMode.COOL: 0x02,
-    HVACMode.AUTO: 0x03,
-    HVACMode.FAN_ONLY: 0x04,
-    HVACMode.DRY: 0x05,
-}
-
-# Маппинг между режимами предустановок Home Assistant и режимами HDL Buspro
+# Карты режимов
 PRESET_MODES_MAP = {
-    PRESET_NONE: 0x00,
-    PRESET_AWAY: 0x01,
-    PRESET_HOME: 0x02,
-    PRESET_SLEEP: 0x03,
+    "normal": 1,
+    "day": 2,
+    "night": 3,
+    "away": 4,
+    "timer": 5,
 }
 
-DEFAULT_MIN_TEMP = 5.0
-DEFAULT_MAX_TEMP = 35.0
+# Коды операций
+OPERATE_CODES = {
+    "read_floor_heating": 0x1944,  # ReadFloorHeatingStatus
+    "control_floor_heating": 0x1946,  # ControlFloorHeatingStatus
+}
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_DEVICES):
@@ -254,121 +251,194 @@ class BusproClimate(ClimateEntity):
         """Return the temperature we try to reach."""
         return self._target_temperature
         
-    async def async_set_hvac_mode(self, hvac_mode: str) -> None:
-        """Set new target hvac mode."""
-        if hvac_mode not in self._attr_hvac_modes:
-            _LOGGER.warning(f"Устройство не поддерживает режим {hvac_mode}")
-            return
-            
-        hdl_mode = HVAC_MODES_MAP.get(hvac_mode, 0)
-        
-        # Отправляем команду на устройство
-        self._gateway.send_hdl_command(
-            self._subnet_id,
-            self._device_id,
-            OPERATION_READ_STATUS,  # Здесь нужно использовать правильный код операции
-            [0x01, hdl_mode]  # Операция установки режима
-        )
-        
-        # Обновляем состояние
-        if hvac_mode == HVACMode.OFF:
-            self._hvac_action = HVACAction.IDLE
-        elif hvac_mode == HVACMode.HEAT:
-            self._hvac_action = HVACAction.HEATING
-        elif hvac_mode == HVACMode.COOL:
-            self._hvac_action = HVACAction.COOLING
-        else:
-            self._hvac_action = HVACAction.IDLE
-            
-        self._hvac_mode = hvac_mode
-        self.async_write_ha_state()
-        
-    async def async_set_preset_mode(self, preset_mode: str) -> None:
-        """Set new preset mode."""
-        if not self._supported_preset_modes or preset_mode not in self._supported_preset_modes:
-            _LOGGER.warning(f"Устройство не поддерживает режим предустановки {preset_mode}")
-            return
-            
-        hdl_preset = PRESET_MODES_MAP.get(preset_mode, 0)
-        
-        # Отправляем команду на устройство
-        self._gateway.send_hdl_command(
-            self._subnet_id,
-            self._device_id,
-            OPERATION_READ_STATUS,  # Здесь нужно использовать правильный код операции
-            [0x02, hdl_preset]  # Операция установки режима предустановки
-        )
-        
-        # Обновляем состояние
-        self._preset_mode = preset_mode
-        self.async_write_ha_state()
-        
     async def async_set_temperature(self, **kwargs) -> None:
         """Set new target temperature."""
         temperature = kwargs.get(ATTR_TEMPERATURE)
         if temperature is None:
             return
             
-        if temperature < self._attr_min_temp or temperature > self._attr_max_temp:
-            _LOGGER.warning(f"Температура {temperature} вне допустимого диапазона ({self._attr_min_temp}-{self._attr_max_temp})")
-            return
-            
-        # Преобразуем температуру в формат HDL Buspro (обычно умножается на 10)
-        hdl_temp = int(temperature * 10)
+        self._target_temperature = temperature
         
         # Отправляем команду на устройство
-        self._gateway.send_hdl_command(
-            self._subnet_id,
-            self._device_id,
-            OPERATION_READ_STATUS,  # Здесь нужно использовать правильный код операции
-            [0x03, hdl_temp >> 8, hdl_temp & 0xFF]  # Операция установки температуры
-        )
+        try:
+            # Преобразуем температуру в формат устройства (умножаем на 10 для работы с десятыми долями)
+            temp_value = int(temperature * 10)
+            
+            # Создаем телеграмму для установки температуры
+            telegram = {
+                "subnet_id": self._subnet_id,
+                "device_id": self._device_id,
+                "operate_code": OPERATE_CODES["control_floor_heating"],
+                "data": [
+                    1,  # temperature_type (Celsius)
+                    0,  # current_temperature (не меняется при установке)
+                    1 if self._hvac_mode != HVACMode.OFF else 0,  # status (on/off)
+                    1,  # mode (Normal)
+                    temp_value,  # normal_temperature
+                    240,  # day_temperature (24.0°C, не меняется)
+                    180,  # night_temperature (18.0°C, не меняется)
+                    150,  # away_temperature (15.0°C, не меняется)
+                ],
+            }
+            
+            # Отправляем команду через шлюз
+            await self._gateway.send_telegram(telegram)
+            _LOGGER.debug(f"Установлена целевая температура {temperature}°C для устройства {self._subnet_id}.{self._device_id}")
+            
+            # Обновляем состояние после отправки команды
+            await self.async_update()
+            
+        except Exception as err:
+            _LOGGER.error(f"Ошибка при установке температуры: {err}")
+            
+    async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
+        """Set new hvac mode."""
+        # Преобразуем режим HVAC в состояние устройства
+        status = 0  # По умолчанию - выключено
         
-        # Обновляем состояние
-        self._target_temperature = temperature
-        self.async_write_ha_state()
+        if hvac_mode != HVACMode.OFF:
+            status = 1  # Включено
+            
+        self._hvac_mode = hvac_mode
         
+        # Отправляем команду на устройство
+        try:
+            # Создаем телеграмму для установки режима
+            telegram = {
+                "subnet_id": self._subnet_id,
+                "device_id": self._device_id,
+                "operate_code": OPERATE_CODES["control_floor_heating"],
+                "data": [
+                    1,  # temperature_type (Celsius)
+                    0,  # current_temperature (не меняется при установке)
+                    status,  # status (on/off)
+                    1,  # mode (Normal)
+                    int(self._target_temperature * 10),  # normal_temperature
+                    240,  # day_temperature (24.0°C, не меняется)
+                    180,  # night_temperature (18.0°C, не меняется)
+                    150,  # away_temperature (15.0°C, не меняется)
+                ],
+            }
+            
+            # Отправляем команду через шлюз
+            await self._gateway.send_telegram(telegram)
+            _LOGGER.debug(f"Установлен режим HVAC {hvac_mode} для устройства {self._subnet_id}.{self._device_id}")
+            
+            # Обновляем состояние после отправки команды
+            await self.async_update()
+            
+        except Exception as err:
+            _LOGGER.error(f"Ошибка при установке режима HVAC: {err}")
+            
+    async def async_set_preset_mode(self, preset_mode: str) -> None:
+        """Set new preset mode."""
+        if preset_mode not in self._supported_preset_modes:
+            _LOGGER.error(f"Неподдерживаемый режим предустановки: {preset_mode}")
+            return
+            
+        # Получаем режим температуры из карты предустановок
+        temp_mode = PRESET_MODES_MAP.get(preset_mode, 1)  # По умолчанию - Normal (1)
+        self._preset_mode = preset_mode
+        
+        # Отправляем команду на устройство
+        try:
+            # Создаем телеграмму для установки режима предустановки
+            telegram = {
+                "subnet_id": self._subnet_id,
+                "device_id": self._device_id,
+                "operate_code": OPERATE_CODES["control_floor_heating"],
+                "data": [
+                    1,  # temperature_type (Celsius)
+                    0,  # current_temperature (не меняется при установке)
+                    1 if self._hvac_mode != HVACMode.OFF else 0,  # status (on/off)
+                    temp_mode,  # mode (из карты предустановок)
+                    int(self._target_temperature * 10),  # normal_temperature
+                    240,  # day_temperature (24.0°C, не меняется)
+                    180,  # night_temperature (18.0°C, не меняется)
+                    150,  # away_temperature (15.0°C, не меняется)
+                ],
+            }
+            
+            # Отправляем команду через шлюз
+            await self._gateway.send_telegram(telegram)
+            _LOGGER.debug(f"Установлен режим предустановки {preset_mode} для устройства {self._subnet_id}.{self._device_id}")
+            
+            # Обновляем состояние после отправки команды
+            await self.async_update()
+            
+        except Exception as err:
+            _LOGGER.error(f"Ошибка при установке режима предустановки: {err}")
+            
     async def async_update(self) -> None:
         """Fetch new state data for this climate device."""
         try:
-            # Запрашиваем текущую температуру
-            temp_response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id],
-                [OPERATION_READ_STATUS],
-                [0x01]  # Канал для текущей температуры
-            )
+            # Создаем телеграмму для запроса статуса
+            telegram = {
+                "subnet_id": self._subnet_id,
+                "device_id": self._device_id,
+                "operate_code": OPERATE_CODES["read_floor_heating"],
+                "data": [],
+            }
             
-            if temp_response and len(temp_response) > 0:
-                # HDL обычно отправляет температуру * 10
-                self._current_temperature = temp_response[0] / 10.0
+            # Отправляем запрос через шлюз
+            response = await self._gateway.send_telegram(telegram)
+            
+            if response and "data" in response:
+                data = response["data"]
                 
-            # Запрашиваем целевую температуру
-            target_temp_response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id],
-                [OPERATION_READ_STATUS],
-                [0x02]  # Канал для целевой температуры
-            )
-            
-            if target_temp_response and len(target_temp_response) > 0:
-                self._target_temperature = target_temp_response[0] / 10.0
-                
-            # Запрашиваем режим работы
-            mode_response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id],
-                [OPERATION_READ_STATUS],
-                [0x03]  # Канал для режима работы
-            )
-            
-            if mode_response and len(mode_response) > 0:
-                hdl_mode = mode_response[0]
-                # Преобразуем режим HDL в режим Home Assistant
-                for ha_mode, hdl_value in HVAC_MODES_MAP.items():
-                    if hdl_value == hdl_mode:
-                        self._hvac_mode = ha_mode
-                        break
-                        
-            # Обновляем доступность
-            self._available = True
+                if len(data) >= 8:
+                    # Интерпретируем полученные данные
+                    temperature_type = data[0]  # 1 - Celsius, 2 - Fahrenheit
+                    current_temp = data[1] / 10.0  # Делим на 10 для получения градусов
+                    status = data[2]  # 0 - выключено, 1 - включено
+                    mode = data[3]  # 1 - Normal, 2 - Day, 3 - Night, 4 - Away, 5 - Timer
+                    normal_temp = data[4] / 10.0
+                    day_temp = data[5] / 10.0
+                    night_temp = data[6] / 10.0
+                    away_temp = data[7] / 10.0
+                    
+                    # Обновляем состояние устройства
+                    self._current_temperature = current_temp
+                    
+                    # Определяем HVAC режим на основе статуса
+                    if status == 0:
+                        self._hvac_mode = HVACMode.OFF
+                        self._hvac_action = HVACAction.IDLE
+                    else:
+                        # По умолчанию устанавливаем режим HEAT
+                        self._hvac_mode = HVACMode.HEAT
+                        self._hvac_action = HVACAction.HEATING
+                    
+                    # Определяем целевую температуру на основе режима
+                    if mode == 1:  # Normal
+                        self._target_temperature = normal_temp
+                        self._preset_mode = PRESET_NONE
+                    elif mode == 2:  # Day
+                        self._target_temperature = day_temp
+                        for preset, preset_mode in PRESET_MODES_MAP.items():
+                            if preset_mode == mode and preset in self._supported_preset_modes:
+                                self._preset_mode = preset
+                                break
+                    elif mode == 3:  # Night
+                        self._target_temperature = night_temp
+                        for preset, preset_mode in PRESET_MODES_MAP.items():
+                            if preset_mode == mode and preset in self._supported_preset_modes:
+                                self._preset_mode = preset
+                                break
+                    elif mode == 4:  # Away
+                        self._target_temperature = away_temp
+                        for preset, preset_mode in PRESET_MODES_MAP.items():
+                            if preset_mode == mode and preset in self._supported_preset_modes:
+                                self._preset_mode = preset
+                                break
+                                
+                    self._available = True
+                    _LOGGER.debug(f"Обновлено состояние устройства климат-контроля {self._subnet_id}.{self._device_id}")
+                else:
+                    _LOGGER.warning(f"Получен неполный ответ от устройства климат-контроля {self._subnet_id}.{self._device_id}: {data}")
+            else:
+                _LOGGER.warning(f"Не удалось получить данные от устройства климат-контроля {self._subnet_id}.{self._device_id}")
+                self._available = False
             
         except Exception as err:
             _LOGGER.error(f"Ошибка при обновлении состояния устройства климат-контроля: {err}")

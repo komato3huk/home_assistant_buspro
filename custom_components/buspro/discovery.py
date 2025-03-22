@@ -242,3 +242,79 @@ class BusproDiscovery:
         except Exception as err:
             _LOGGER.error(f"Ошибка при отправке discovery-пакета: {err}")
             return False 
+
+    def _process_discovery_response(self, subnet_id: int, device_id: int, device_type: int, discovery_data: bytes) -> None:
+        """Process discovery response from a device."""
+        try:
+            _LOGGER.debug(f"Обработка ответа обнаружения от устройства {subnet_id}.{device_id}, тип: 0x{device_type:X}")
+            
+            # Получаем модель устройства и другие параметры из данных
+            model = "HDL"  # По умолчанию
+            
+            # Определяем тип устройства на основе device_type
+            if device_type == 0x0001:  # Пример: Реле
+                self._add_device_to_type(SWITCH, subnet_id, device_id, model=model)
+                # Добавляем несколько каналов для устройства
+                for channel in range(1, 5):  # Предполагаем 4 канала
+                    self._add_device_to_type(SWITCH, subnet_id, device_id, channel=channel, model=model)
+            elif device_type == 0x0002:  # Пример: Диммер
+                self._add_device_to_type(LIGHT, subnet_id, device_id, model=model)
+                # Добавляем несколько каналов для устройства
+                for channel in range(1, 3):  # Предполагаем 2 канала
+                    self._add_device_to_type(LIGHT, subnet_id, device_id, channel=channel, model=model)
+            elif device_type == 0x0003:  # Пример: Контроллер штор
+                self._add_device_to_type(COVER, subnet_id, device_id, model=model)
+                # Обычно один канал
+                self._add_device_to_type(COVER, subnet_id, device_id, channel=1, model=model)
+            elif device_type == 0x0004:  # Пример: Термостат
+                self._add_device_to_type(CLIMATE, subnet_id, device_id, model=model)
+                # Обычно один канал
+                self._add_device_to_type(CLIMATE, subnet_id, device_id, channel=1, model=model)
+            elif device_type == 0x0005:  # Пример: Сенсор
+                self._add_device_to_type(SENSOR, subnet_id, device_id, model=model)
+                # Различные типы сенсоров
+                self._add_device_to_type(SENSOR, subnet_id, device_id, channel=1, type="temperature", model=model)
+                self._add_device_to_type(SENSOR, subnet_id, device_id, channel=2, type="humidity", model=model)
+                self._add_device_to_type(SENSOR, subnet_id, device_id, channel=3, type="illuminance", model=model)
+                # Сенсор движения как бинарный сенсор
+                self._add_device_to_type(BINARY_SENSOR, subnet_id, device_id, channel=1, type="motion", model=model)
+            else:
+                _LOGGER.debug(f"Неизвестный тип устройства: 0x{device_type:X} для {subnet_id}.{device_id}")
+                
+        except Exception as ex:
+            _LOGGER.error(f"Ошибка при обработке ответа обнаружения от {subnet_id}.{device_id}: {ex}")
+            
+    def _add_device_to_type(self, device_type: str, subnet_id: int, device_id: int, channel: int = None, type: str = None, model: str = None) -> None:
+        """Add device to specific type list."""
+        # Проверяем, существует ли уже устройство с таким адресом
+        device_exists = False
+        for device in self.devices[device_type]:
+            if device["subnet_id"] == subnet_id and device["device_id"] == device_id:
+                if channel is not None and device.get("channel") == channel:
+                    device_exists = True
+                    break
+        
+        if not device_exists:
+            device_info = {
+                "subnet_id": subnet_id,
+                "device_id": device_id,
+                "model": model or "HDL",
+            }
+            
+            if channel is not None:
+                device_info["channel"] = channel
+                
+            if type is not None:
+                device_info["type"] = type
+                
+            # Создаем удобное имя для устройства
+            if channel is not None:
+                if type is not None:
+                    device_info["name"] = f"{type.capitalize()} {subnet_id}.{device_id}.{channel}"
+                else:
+                    device_info["name"] = f"{device_type.capitalize()} {subnet_id}.{device_id}.{channel}"
+            else:
+                device_info["name"] = f"{device_type.capitalize()} {subnet_id}.{device_id}"
+                
+            self.devices[device_type].append(device_info)
+            _LOGGER.debug(f"Добавлено устройство {device_type}: {device_info['name']}") 

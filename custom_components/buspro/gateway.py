@@ -7,9 +7,15 @@ from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from homeassistant.core import HomeAssistant
-from homeassistant.util import dt as dt_util
 
 from .const import (
+    LOGGER,
+    CONF_GATEWAY_HOST,
+    CONF_GATEWAY_PORT,
+    CONF_DEVICE_SUBNET_ID,
+    CONF_DEVICE_ID,
+    CONF_POLL_INTERVAL,
+    CONF_TIMEOUT,
     OPERATION_DISCOVERY,
     OPERATION_READ_STATUS,
     OPERATION_SINGLE_CHANNEL,
@@ -97,11 +103,22 @@ class BusproGateway:
             return None
             
         try:
-            response = await self.hdl_device.send_message(
-                target_address, operation_code, data
-            )
-            self._last_update = time.time()
-            return response
+            # Извлекаем subnet_id и device_id из target_address
+            subnet_id = target_address[0]
+            device_id = target_address[1]
+            
+            # Преобразуем код операции из списка в значение
+            operation = operation_code[0]
+            
+            # Отправляем сообщение используя send_hdl_command
+            success = self.send_hdl_command(subnet_id, device_id, operation, data)
+            if success:
+                self._last_update = time.time()
+                # В данной реализации просто возвращаем данные как ответ,
+                # так как мы не ожидаем синхронного ответа от устройства
+                # Реальные данные придут асинхронно через UDP
+                return data
+            return None
         except Exception as err:
             _LOGGER.error("Failed to send message: %s", err)
             return None

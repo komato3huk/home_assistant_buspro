@@ -91,26 +91,33 @@ async def async_setup_entry(
 ) -> None:
     """Set up the HDL Buspro sensor platform."""
     gateway = hass.data[DOMAIN][config_entry.entry_id]["gateway"]
-    devices = hass.data[DOMAIN][config_entry.entry_id]["devices"]
+    discovery = hass.data[DOMAIN][config_entry.entry_id]["discovery"]
     
     entities = []
     
-    # Add all discovered sensor devices
-    for device in devices.get("sensor", []):
-        # Each sensor device might have multiple sensor types
-        for sensor_type, config in SENSOR_TYPES.items():
-            entities.append(
-                BusproSensor(
-                    gateway,
-                    device["subnet_id"],
-                    device["device_id"],
-                    f"{device['name']} {config['name']}",
-                    sensor_type,
-                    config,
-                )
+    # Получаем сенсоры из обнаруженных устройств
+    for device in discovery.get_devices_by_type(SENSOR):
+        subnet_id = device["subnet_id"]
+        device_id = device["device_id"]
+        
+        # Для каждого типа сенсора в устройстве создаем сущность
+        for sensor_type_key, sensor_config in SENSOR_TYPES.items():
+            device_name = device.get("name", f"Sensor {subnet_id}.{device_id}")
+            name = f"{device_name} {sensor_config['name']}"
+            
+            entity = BusproSensor(
+                gateway,
+                subnet_id,
+                device_id,
+                name,
+                sensor_type_key,
+                sensor_config,
             )
+            entities.append(entity)
     
-    async_add_entities(entities)
+    if entities:
+        async_add_entities(entities)
+        _LOGGER.info(f"Добавлено {len(entities)} сенсоров HDL Buspro")
 
 async def async_setup_platform(
     hass: HomeAssistant,

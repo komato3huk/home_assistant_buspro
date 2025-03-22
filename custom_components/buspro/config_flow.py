@@ -179,7 +179,7 @@ class BusproOptionsFlowHandler(config_entries.OptionsFlow):
 
     def __init__(self, config_entry):
         """Initialize options flow."""
-        self.config_entry = config_entry
+        self._config_entry = config_entry
 
     async def async_step_init(self, user_input=None):
         """Manage the options."""
@@ -189,38 +189,38 @@ class BusproOptionsFlowHandler(config_entries.OptionsFlow):
         options = {
             vol.Optional(
                 CONF_POLL_INTERVAL,
-                default=self.config_entry.options.get(
+                default=self._config_entry.options.get(
                     CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL
                 ),
             ): int,
             vol.Optional(
                 CONF_TIMEOUT,
-                default=self.config_entry.options.get(
+                default=self._config_entry.options.get(
                     CONF_TIMEOUT, DEFAULT_TIMEOUT
                 ),
             ): int,
             vol.Optional(
                 CONF_DEVICE_SUBNET_ID,
-                default=self.config_entry.options.get(
+                default=self._config_entry.options.get(
                     CONF_DEVICE_SUBNET_ID, DEFAULT_DEVICE_SUBNET_ID
                 ),
             ): int,
             vol.Optional(
                 CONF_DEVICE_ID,
-                default=self.config_entry.options.get(
+                default=self._config_entry.options.get(
                     CONF_DEVICE_ID, DEFAULT_DEVICE_ID
                 ),
             ): int,
             vol.Optional(
                 CONF_GATEWAY_HOST,
-                default=self.config_entry.options.get(
-                    CONF_GATEWAY_HOST, self.config_entry.data.get(CONF_GATEWAY_HOST, DEFAULT_GATEWAY_HOST)
+                default=self._config_entry.options.get(
+                    CONF_GATEWAY_HOST, self._config_entry.data.get(CONF_GATEWAY_HOST, DEFAULT_GATEWAY_HOST)
                 ),
             ): str,
             vol.Optional(
                 CONF_GATEWAY_PORT,
-                default=self.config_entry.options.get(
-                    CONF_GATEWAY_PORT, self.config_entry.data.get(CONF_GATEWAY_PORT, DEFAULT_GATEWAY_PORT)
+                default=self._config_entry.options.get(
+                    CONF_GATEWAY_PORT, self._config_entry.data.get(CONF_GATEWAY_PORT, DEFAULT_GATEWAY_PORT)
                 ),
             ): int,
         }
