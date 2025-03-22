@@ -159,11 +159,6 @@ class BusproLight(LightEntity):
     def unique_id(self):
         """Return the unique id."""
         return f"{self._subnet_id}_{self._device_id}"
-    
-    @property
-    def entity_id(self):
-        """Return the entity ID for this light."""
-        return f"light.light_{self._subnet_id}_{self._device_id}"
 
     async def async_update(self) -> None:
         """Fetch new state data for this light."""

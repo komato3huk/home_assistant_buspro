@@ -71,6 +71,11 @@ class BusproGateway:
         except Exception as err:
             _LOGGER.error("Failed to stop HDL Buspro gateway: %s", err)
 
+    @property
+    def connected(self) -> bool:
+        """Return True if gateway is connected."""
+        return self._connected
+
     async def send_message(
         self,
         target_address: List[int],
