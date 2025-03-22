@@ -7,6 +7,7 @@ https://home-assistant.io/components/...
 
 import logging
 from typing import Any, Dict, List, Optional
+import asyncio
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
@@ -21,7 +22,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
-from .const import DOMAIN, OPERATION_WRITE
+from .const import DOMAIN, OPERATION_WRITE, COVER
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,6 +43,9 @@ COMMAND_UP = 1
 COMMAND_DOWN = 2
 COMMAND_POSITION = 3
 
+# Коды операций для управления рольставнями
+OPERATION_CURTAIN_CONTROL = 0xE01C
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -53,25 +57,18 @@ async def async_setup_entry(
     
     entities = []
     
-    # Get covers from discovered devices
-    for device in discovery.get_devices_by_type("cover"):
-        subnet_id = device["subnet_id"]
-        device_id = device["device_id"]
-        channel = device.get("channel", 1)
-        device_name = device.get("name", f"Cover {subnet_id}.{device_id}.{channel}")
-        
-        _LOGGER.info(f"Found cover device: {device_name} ({subnet_id}.{device_id}.{channel})")
-        
-        entity = BusproCover(
-            gateway,
-            subnet_id,
-            device_id,
-            channel,
-            device_name,
-        )
-        entities.append(entity)
-        
-        _LOGGER.debug(f"Added cover: {device_name} ({subnet_id}.{device_id}.{channel})")
+    # Получение обнаруженных устройств управления рольставнями
+    if COVER in discovery.devices:
+        for device in discovery.devices[COVER]:
+            subnet_id = device.get("subnet_id")
+            device_id = device.get("device_id")
+            channel = device.get("channel")
+            name = device.get("name")
+            
+            _LOGGER.info(f"Добавление устройства управления рольставнями: {name} ({subnet_id}.{device_id}.{channel})")
+            entities.append(
+                BusproCover(gateway, subnet_id, device_id, channel, name)
+            )
     
     if entities:
         async_add_entities(entities)
@@ -123,7 +120,7 @@ async def async_setup_platform(
 
 
 class BusproCover(CoverEntity):
-    """Representation of a HDL Buspro Cover device."""
+    """Representation of a HDL Buspro Cover."""
 
     def __init__(
         self,
@@ -133,29 +130,21 @@ class BusproCover(CoverEntity):
         channel: int,
         name: str,
     ):
-        """Initialize the cover device."""
+        """Initialize the cover."""
         self._gateway = gateway
         self._subnet_id = subnet_id
         self._device_id = device_id
         self._channel = channel
         self._name = name
-        
-        # State properties
         self._position = None
         self._is_opening = False
         self._is_closing = False
         self._available = True
+        # Создаем уникальный ID, включающий все параметры устройства
+        self._unique_id = f"cover_{subnet_id}_{device_id}_{channel}"
         
-        # Generate unique ID
-        self._attr_unique_id = f"cover_{subnet_id}_{device_id}_{channel}"
-        
-        # Set supported features
-        self._attr_supported_features = (
-            CoverEntityFeature.OPEN | 
-            CoverEntityFeature.CLOSE | 
-            CoverEntityFeature.STOP | 
-            CoverEntityFeature.SET_POSITION
-        )
+        # Поддерживаемые функции
+        self._attr_supported_features = DEFAULT_FEATURES
         
     @property
     def name(self) -> str:
@@ -192,125 +181,150 @@ class BusproCover(CoverEntity):
             return None
         return self._position == 0
         
+    @property
+    def unique_id(self) -> str:
+        """Return a unique ID."""
+        return self._unique_id
+        
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the cover."""
-        _LOGGER.debug(f"Opening cover {self._subnet_id}.{self._device_id}.{self._channel}")
+        _LOGGER.info(f"Открываем рольставни: {self._name} ({self._subnet_id}.{self._device_id}.{self._channel})")
         
-        # Create telegram for opening
-        telegram = {
-            "subnet_id": self._subnet_id,
-            "device_id": self._device_id,
-            "operate_code": OPERATION_WRITE,
-            "data": [COMMAND_UP, self._channel],
-        }
+        # Операция управления шторами, команда UP (1)
+        operation_code = OPERATION_CURTAIN_CONTROL
+        data = [self._channel, COMMAND_UP, 0, 0]  # channel, command, unused1, unused2
         
-        # Send telegram via gateway
         try:
-            await self._gateway.send_telegram(telegram)
+            await self._gateway.send_message(
+                [self._subnet_id, self._device_id, 0, 0],  # target address
+                [operation_code >> 8, operation_code & 0xFF],  # operation code
+                data,
+            )
+            
+            # Обновляем внутреннее состояние
             self._is_opening = True
             self._is_closing = False
-            _LOGGER.info(f"Cover {self._subnet_id}.{self._device_id}.{self._channel} opening")
-        except Exception as err:
-            _LOGGER.error(f"Error opening cover {self._subnet_id}.{self._device_id}.{self._channel}: {err}")
-        
+            self.async_write_ha_state()
+            
+            # Через небольшую задержку обновим состояние, чтобы получить обновленное положение
+            await asyncio.sleep(1)
+            await self.async_update()
+        except Exception as e:
+            _LOGGER.error(f"Не удалось открыть рольставни {self._name}: {e}")
+
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close the cover."""
-        _LOGGER.debug(f"Closing cover {self._subnet_id}.{self._device_id}.{self._channel}")
+        _LOGGER.info(f"Закрываем рольставни: {self._name} ({self._subnet_id}.{self._device_id}.{self._channel})")
         
-        # Create telegram for closing
-        telegram = {
-            "subnet_id": self._subnet_id,
-            "device_id": self._device_id,
-            "operate_code": OPERATION_WRITE,
-            "data": [COMMAND_DOWN, self._channel],
-        }
+        # Операция управления шторами, команда DOWN (2)
+        operation_code = OPERATION_CURTAIN_CONTROL
+        data = [self._channel, COMMAND_DOWN, 0, 0]  # channel, command, unused1, unused2
         
-        # Send telegram via gateway
         try:
-            await self._gateway.send_telegram(telegram)
+            await self._gateway.send_message(
+                [self._subnet_id, self._device_id, 0, 0],  # target address
+                [operation_code >> 8, operation_code & 0xFF],  # operation code
+                data,
+            )
+            
+            # Обновляем внутреннее состояние
             self._is_opening = False
             self._is_closing = True
-            _LOGGER.info(f"Cover {self._subnet_id}.{self._device_id}.{self._channel} closing")
-        except Exception as err:
-            _LOGGER.error(f"Error closing cover {self._subnet_id}.{self._device_id}.{self._channel}: {err}")
-        
+            self.async_write_ha_state()
+            
+            # Через небольшую задержку обновим состояние, чтобы получить обновленное положение
+            await asyncio.sleep(1)
+            await self.async_update()
+        except Exception as e:
+            _LOGGER.error(f"Не удалось закрыть рольставни {self._name}: {e}")
+
     async def async_stop_cover(self, **kwargs: Any) -> None:
-        """Stop the cover."""
-        _LOGGER.debug(f"Stopping cover {self._subnet_id}.{self._device_id}.{self._channel}")
+        """Stop the cover movement."""
+        _LOGGER.info(f"Останавливаем рольставни: {self._name} ({self._subnet_id}.{self._device_id}.{self._channel})")
         
-        # Create telegram for stopping
-        telegram = {
-            "subnet_id": self._subnet_id,
-            "device_id": self._device_id,
-            "operate_code": OPERATION_WRITE,
-            "data": [COMMAND_STOP, self._channel],
-        }
+        # Операция управления шторами, команда STOP (0)
+        operation_code = OPERATION_CURTAIN_CONTROL
+        data = [self._channel, COMMAND_STOP, 0, 0]  # channel, command, unused1, unused2
         
-        # Send telegram via gateway
         try:
-            await self._gateway.send_telegram(telegram)
+            await self._gateway.send_message(
+                [self._subnet_id, self._device_id, 0, 0],  # target address
+                [operation_code >> 8, operation_code & 0xFF],  # operation code
+                data,
+            )
+            
+            # Обновляем внутреннее состояние
             self._is_opening = False
             self._is_closing = False
-            _LOGGER.info(f"Cover {self._subnet_id}.{self._device_id}.{self._channel} stopped")
-        except Exception as err:
-            _LOGGER.error(f"Error stopping cover {self._subnet_id}.{self._device_id}.{self._channel}: {err}")
-        
+            self.async_write_ha_state()
+            
+            # Через небольшую задержку обновим состояние, чтобы получить обновленное положение
+            await asyncio.sleep(1)
+            await self.async_update()
+        except Exception as e:
+            _LOGGER.error(f"Не удалось остановить рольставни {self._name}: {e}")
+
     async def async_set_cover_position(self, **kwargs: Any) -> None:
         """Set the cover position."""
         position = kwargs.get("position")
         if position is None:
+            _LOGGER.error(f"Не указано положение для рольставни {self._name}")
             return
-            
-        _LOGGER.debug(f"Setting cover {self._subnet_id}.{self._device_id}.{self._channel} position to {position}%")
         
-        # Convert position from 0-100 to device format (0-255)
-        hdl_position = int(position * 255 / 100)
+        _LOGGER.info(f"Устанавливаем положение рольставни {self._name} на {position}%")
         
-        # Create telegram for setting position
-        telegram = {
-            "subnet_id": self._subnet_id,
-            "device_id": self._device_id,
-            "operate_code": OPERATION_WRITE,
-            "data": [COMMAND_POSITION, self._channel, hdl_position],
-        }
+        # HDL Buspro использует обратный процент (0% = полностью открыто, 100% = полностью закрыто)
+        # Home Assistant использует: 0% = полностью закрыто, 100% = полностью открыто
+        # Поэтому инвертируем значение
+        hdl_position = 100 - position
         
-        # Send telegram via gateway
+        # Операция управления шторами, команда POSITION (3)
+        operation_code = OPERATION_CURTAIN_CONTROL
+        data = [self._channel, COMMAND_POSITION, hdl_position, 0]  # channel, command, position, unused
+        
         try:
-            await self._gateway.send_telegram(telegram)
+            await self._gateway.send_message(
+                [self._subnet_id, self._device_id, 0, 0],  # target address
+                [operation_code >> 8, operation_code & 0xFF],  # operation code
+                data,
+            )
+            
+            # Обновляем внутреннее состояние
             self._position = position
             self._is_opening = False
             self._is_closing = False
-            _LOGGER.info(f"Cover {self._subnet_id}.{self._device_id}.{self._channel} position set to {position}%")
-        except Exception as err:
-            _LOGGER.error(f"Error setting cover position for {self._subnet_id}.{self._device_id}.{self._channel}: {err}")
-        
+            self.async_write_ha_state()
+            
+            # Через небольшую задержку обновим состояние, чтобы получить обновленное положение
+            await asyncio.sleep(1)
+            await self.async_update()
+        except Exception as e:
+            _LOGGER.error(f"Не удалось установить положение рольставни {self._name}: {e}")
+
     async def async_update(self) -> None:
-        """Fetch new state data for this cover."""
+        """Update the cover state."""
         try:
-            _LOGGER.debug(f"Updating cover state for {self._subnet_id}.{self._device_id}.{self._channel}")
+            # Запрос состояния устройства
+            operation_code = OPERATION_CURTAIN_CONTROL
+            data = [self._channel, 0, 0, 0]  # channel, запрос состояния
             
-            # For now, we have limited feedback from the device
-            # In a real scenario, you would send a status request telegram and process the response
-            # For demonstration, we'll just mark the device as available
-            self._available = True
+            # Отправляем запрос на получение состояния
+            response = await self._gateway.send_message(
+                [self._subnet_id, self._device_id, 0, 0],  # target address
+                [operation_code >> 8, operation_code & 0xFF],  # operation code
+                data,
+            )
             
-            # If in motion, update position based on direction
-            if self._is_opening and self._position is not None:
-                self._position = min(100, self._position + 10)
-                if self._position >= 100:
-                    self._is_opening = False
-                    
-            elif self._is_closing and self._position is not None:
-                self._position = max(0, self._position - 10)
-                if self._position <= 0:
-                    self._is_closing = False
-                    
-            # If position is still None, set a default
-            if self._position is None:
-                self._position = 50
-                
-        except Exception as err:
-            _LOGGER.error(f"Error updating cover state for {self._subnet_id}.{self._device_id}.{self._channel}: {err}")
-            # Don't change availability for temporary errors
-            if self._position is None:
-                self._available = False 
+            if response and len(response) >= 4:
+                # HDL Buspro использует обратный процент (0% = полностью открыто, 100% = полностью закрыто)
+                # Home Assistant использует: 0% = полностью закрыто, 100% = полностью открыто
+                hdl_position = response[2]  # Третий байт содержит положение
+                self._position = 100 - hdl_position
+                self._is_opening = False
+                self._is_closing = False
+                self._available = True
+            else:
+                _LOGGER.warning(f"Неверный ответ от рольставни {self._name}: {response}")
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при обновлении состояния рольставни {self._name}: {e}")
+            self._available = False 

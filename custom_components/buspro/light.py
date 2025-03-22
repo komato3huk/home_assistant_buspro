@@ -51,75 +51,31 @@ async def async_setup_entry(
     
     entities = []
     
-    # Получаем осветительные устройства из обнаруженных устройств
-    for device in discovery.get_devices_by_type("light"):
-        subnet_id = device["subnet_id"]
-        device_id = device["device_id"]
-        channels = device.get("channels", 1)
-        device_name = device.get("name", f"Light {subnet_id}.{device_id}")
-        
-        _LOGGER.info(f"Обнаружено устройство освещения: {device_name} ({subnet_id}.{device_id})")
-        
-        # Для модулей освещения, обычно есть несколько каналов
-        for channel in range(1, channels + 1):
-            name = f"{device_name} {channel}" if channels > 1 else device_name
-            channel_type = device.get("type", "dimmer")  # По умолчанию считаем диммером
+    # Получение обнаруженных устройств освещения
+    if LIGHT in discovery.devices:
+        for device in discovery.devices[LIGHT]:
+            subnet_id = device.get("subnet_id")
+            device_id = device.get("device_id")
+            channel = device.get("channel")
+            name = device.get("name")
+            model = device.get("model", "")
             
-            # Создаем сущность освещения в зависимости от типа канала
-            if channel_type == "dimmer":
-                entity = BusproDimmerLight(
-                    gateway,
-                    subnet_id,
-                    device_id,
-                    channel,
-                    name,
+            # Определение типа устройства по модели
+            if model and ("RGB" in model or "rgb" in model):
+                _LOGGER.info(f"Добавление RGB светильника: {name} ({subnet_id}.{device_id}.{channel})")
+                entities.append(
+                    BusproRGBLight(gateway, subnet_id, device_id, channel, name)
                 )
-            elif channel_type == "relay":
-                entity = BusproRelayLight(
-                    gateway,
-                    subnet_id,
-                    device_id,
-                    channel,
-                    name,
-                )
-            elif channel_type == "rgb":
-                entity = BusproRGBLight(
-                    gateway,
-                    subnet_id,
-                    device_id,
-                    channel,
-                    name,
+            elif model and ("Dimmer" in model or "dimmer" in model or "MDT" in model):
+                _LOGGER.info(f"Добавление диммера: {name} ({subnet_id}.{device_id}.{channel})")
+                entities.append(
+                    BusproDimmerLight(gateway, subnet_id, device_id, channel, name)
                 )
             else:
-                _LOGGER.warning(f"Неизвестный тип канала освещения: {channel_type} для устройства {subnet_id}.{device_id}.{channel}")
-                continue
-                
-            entities.append(entity)
-            _LOGGER.debug(f"Добавлен канал освещения: {name} ({subnet_id}.{device_id}.{channel}), тип: {channel_type}")
-    
-    # Для отладки, если не найдено ни одного устройства освещения, добавим тестовые
-    if not entities:
-        _LOGGER.info("Добавление тестовых устройств освещения для отладки")
-        
-        # Тестовый диммер
-        test_dimmer = BusproDimmerLight(
-            gateway,
-            1,  # subnet_id
-            8,  # device_id
-            1,  # channel
-            "Диммер 1.8.1",
-        )
-        entities.append(test_dimmer)
-        
-        # Тестовое реле
-        test_relay = BusproRelayLight(
-            gateway,
-            1,  # subnet_id
-            8,  # device_id
-            2,  # channel
-            "Реле 1.8.2",
-        )
-        entities.append(test_relay)
+                _LOGGER.info(f"Добавление релейного светильника: {name} ({subnet_id}.{device_id}.{channel})")
+                entities.append(
+                    BusproRelayLight(gateway, subnet_id, device_id, channel, name)
+                )
     
     if entities:
         async_add_entities(entities)
@@ -171,7 +127,7 @@ async def async_setup_platform(
 
 
 class BusproBaseLight(LightEntity):
-    """Base representation of a HDL Buspro Light."""
+    """Базовый класс для светильников HDL Buspro."""
 
     def __init__(
         self,
@@ -187,13 +143,10 @@ class BusproBaseLight(LightEntity):
         self._device_id = device_id
         self._channel = channel
         self._name = name
-        
-        # Генерируем уникальный ID
-        self._attr_unique_id = f"light_{subnet_id}_{device_id}_{channel}"
-        
-        # Состояние света
         self._state = False
         self._available = True
+        # Создаем уникальный ID, включающий все параметры устройства
+        self._unique_id = f"light_{subnet_id}_{device_id}_{channel}"
         
     @property
     def name(self) -> str:
@@ -221,6 +174,11 @@ class BusproBaseLight(LightEntity):
     async def async_update(self) -> None:
         """Fetch new state data for this light."""
         raise NotImplementedError()
+
+    @property
+    def unique_id(self) -> str:
+        """Return a unique ID."""
+        return self._unique_id
 
 
 class BusproRelayLight(BusproBaseLight):

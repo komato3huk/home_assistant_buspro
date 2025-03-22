@@ -82,22 +82,23 @@ class BusproDiscovery:
 
     async def _simulated_discovery(self, subnet_id: int):
         """Симуляция обнаружения устройств для тестирования."""
-        # В реальной имплементации здесь будет отправка discovery-пакетов
-        # и обработка ответов
-
-        # Добавляем реальное устройство климат-контроля
+        # Очищаем предыдущие результаты обнаружения
+        for device_type in self.devices:
+            self.devices[device_type] = []
+            
+        # Добавляем устройства климат-контроля (теплый пол)
         self.devices[CLIMATE].extend([
             {
                 "subnet_id": 1,
                 "device_id": 4,
                 "channel": 1,
-                "name": "Теплый пол 1.4",
+                "name": "Теплый пол 1.4.1",
                 "model": "HDL-MFHC01.431",
                 "device_type": 0x0073,  # Тип устройства для Floor Heating Controller
             }
         ])
 
-        # Добавляем контроллер штор
+        # Добавляем контроллер штор (рольставни)
         self.devices[COVER].extend([
             {
                 "subnet_id": 1,
@@ -115,66 +116,89 @@ class BusproDiscovery:
             }
         ])
 
-        # Добавляем сенсор температуры (необходим для отображения температуры)
+        # Добавляем сенсор температуры
         self.devices[SENSOR].extend([
             {
                 "subnet_id": 1,
                 "device_id": 4,  # Тот же адрес, что и у климат-контроллера
                 "channel": 1,
-                "name": "Температура пола 1.4",
+                "name": "Температура пола 1.4.1",
                 "model": "HDL-MFHC01.431",
                 "type": "temperature",
             }
         ])
 
-        # Эмулируем дополнительные устройства для тестирования
-        # Добавляем диммеры (light)
+        # Добавляем диммеры (освещение)
         self.devices[LIGHT].extend([
             {
                 "subnet_id": subnet_id,
                 "device_id": 2,
                 "channel": 1,
-                "name": f"Свет 1 ({subnet_id}.2.1)",
-                "model": "HDL-MDT0402.433",
+                "name": f"Свет 1 {subnet_id}.2.1",
+                "model": "HDL-MDT0402.433",  # Модель диммера
             },
             {
                 "subnet_id": subnet_id,
                 "device_id": 2,
                 "channel": 2,
-                "name": f"Свет 2 ({subnet_id}.2.2)",
-                "model": "HDL-MDT0402.433",
+                "name": f"Свет 2 {subnet_id}.2.2",
+                "model": "HDL-MDT0402.433",  # Модель диммера
             },
         ])
 
-        # Добавляем реле (switch)
+        # Добавляем реле (выключатели)
         self.devices[SWITCH].extend([
             {
                 "subnet_id": subnet_id,
                 "device_id": 5,
                 "channel": 1,
-                "name": f"Розетка 1 ({subnet_id}.5.1)",
-                "model": "HDL-MR0810.433",
+                "name": f"Розетка 1 {subnet_id}.5.1",
+                "model": "HDL-MR0810.433",  # Модель реле
             },
             {
                 "subnet_id": subnet_id,
                 "device_id": 5,
                 "channel": 2,
-                "name": f"Розетка 2 ({subnet_id}.5.2)",
-                "model": "HDL-MR0810.433",
+                "name": f"Розетка 2 {subnet_id}.5.2",
+                "model": "HDL-MR0810.433",  # Модель реле
             },
+            {
+                "subnet_id": subnet_id,
+                "device_id": 5,
+                "channel": 3,
+                "name": f"Розетка 3 {subnet_id}.5.3",
+                "model": "HDL-MR0810.433",  # Модель реле
+            },
+            {
+                "subnet_id": subnet_id,
+                "device_id": 5,
+                "channel": 4,
+                "name": f"Розетка 4 {subnet_id}.5.4",
+                "model": "HDL-MR0810.433",  # Модель реле
+            }
         ])
 
-        # Добавляем сенсор движения (binary_sensor)
+        # Добавляем бинарные сенсоры (датчики)
         self.devices[BINARY_SENSOR].extend([
             {
                 "subnet_id": subnet_id,
                 "device_id": 6,
                 "channel": 1,
-                "name": f"Датчик движения ({subnet_id}.6.1)",
-                "model": "HDL-MSPU05.433",
-                "type": "motion",
+                "name": f"Датчик движения {subnet_id}.6.1",
+                "model": "HDL-MSPU05.4C",  # Модель мультисенсора
             }
         ])
+        
+        _LOGGER.info(f"Результаты симулированного обнаружения устройств в подсети {subnet_id}:")
+        for device_type, devices in self.devices.items():
+            if devices:
+                _LOGGER.info(f"- {device_type}: {len(devices)} устройств")
+                for device in devices:
+                    _LOGGER.info(f"  * {device['name']} ({device['subnet_id']}.{device['device_id']}.{device['channel']})")
+
+        # Вызываем коллбеки для уведомления о завершении обнаружения
+        for callback in self._callbacks:
+            callback(self.devices)
 
     def register_callback(self, callback: Callable):
         """Register a callback for device discovery."""
