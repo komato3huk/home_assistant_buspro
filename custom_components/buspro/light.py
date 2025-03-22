@@ -24,7 +24,6 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from ..buspro import DATA_BUSPRO
 from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)

@@ -31,7 +31,6 @@ from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.config_entries import ConfigEntry
 
-from ..buspro import DATA_BUSPRO
 from .const import DOMAIN, OPERATION_READ_STATUS
 
 DEFAULT_CONF_UNIT_OF_MEASUREMENT = ""
@@ -85,142 +84,6 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
         ])
 })
 
-
-# noinspection PyUnusedLocal
-async def async_setup_platform(hass, config, async_add_entites, discovery_info=None):
-    """Set up Buspro switch devices."""
-    # noinspection PyUnresolvedReferences
-    from .pybuspro.devices import Sensor
-
-    hdl = hass.data[DATA_BUSPRO].hdl
-    devices = []
-
-    for device_config in config[CONF_DEVICES]:
-        address = device_config[CONF_ADDRESS]
-        name = device_config[CONF_NAME]
-        sensor_type = device_config[CONF_TYPE]
-        device = device_config[CONF_DEVICE]
-        offset = device_config[CONF_OFFSET]
-        
-        scan_interval = device_config[CONF_SCAN_INTERVAL]
-        interval = 0
-        if scan_interval is not None:
-            interval = int(scan_interval)
-            
-        address2 = address.split('.')
-        device_address = (int(address2[0]), int(address2[1]))
-
-        _LOGGER.debug("Adding sensor '{}' with address {}, sensor type '{}'".format(
-            name, device_address, sensor_type))
-
-        sensor = Sensor(hdl, device_address, device=device, name=name)
-
-        devices.append(BusproSensor(hass, sensor, sensor_type, interval, offset))
-
-    async_add_entites(devices)
-
-
-# noinspection PyAbstractClass
-class BusproSensor(SensorEntity):
-    """Representation of a HDL Buspro Sensor."""
-
-    def __init__(
-        self,
-        hass: HomeAssistant,
-        device,
-        sensor_type: int,
-        scan_interval: int,
-        offset: int,
-    ):
-        """Initialize the sensor."""
-        self._hass = hass
-        self._device = device
-        self._sensor_type = sensor_type
-        self._offset = offset
-        self._available = True
-        self._state = None
-
-        # Set entity properties from config
-        self._attr_device_class = SENSOR_TYPES[sensor_type]["device_class"]
-        self._attr_state_class = SENSOR_TYPES[sensor_type]["state_class"]
-        self._attr_native_unit_of_measurement = SENSOR_TYPES[sensor_type]["unit"]
-
-        self._should_poll = False
-        if scan_interval > 0:
-            self._should_poll = True
-
-    @callback
-    def async_register_callbacks(self):
-        """Register callbacks to update hass after device was changed."""
-
-        # noinspection PyUnusedLocal
-        async def after_update_callback(device):
-            """Call after device was updated."""
-            if self._hass is not None:
-                self._state = self._device.temperature
-                self._available = True
-                self.async_write_ha_state()
-
-        self._device.register_device_updated_cb(after_update_callback)
-
-    @property
-    def should_poll(self):
-        """No polling needed within Buspro unless explicitly set."""
-        return self._should_poll
-
-    async def async_update(self):
-        await self._device.read_sensor_status()
-
-    @property
-    def name(self):
-        """Return the display name of this sensor."""
-        return self._device.name
-
-    @property
-    def available(self):
-        """Return True if entity is available."""
-        connected = self._hass.data[DATA_BUSPRO].connected
-        return connected and self._state is not None
-
-    @property
-    def native_value(self):
-        """Return the state of the sensor."""
-        if self._state is None:
-            return None
-
-        state = self._state
-        if self._offset is not None and state != 0:
-            state = state + int(self._offset)
-
-        return state
-
-    @property
-    def device_class(self):
-        """Return the class of this sensor."""
-        return self._attr_device_class
-
-    @property
-    def state_class(self):
-        """Return the state class of this sensor."""
-        return self._attr_state_class
-
-    @property
-    def unit_of_measurement(self):
-        """Return the unit this state is expressed in."""
-        return self._attr_native_unit_of_measurement
-
-    @property
-    def extra_state_attributes(self):
-        """Return the state attributes."""
-        attributes = {}
-        attributes['state_class'] = self.state_class
-        return attributes
-
-    @property
-    def unique_id(self):
-        """Return the unique id."""
-        return f"{self._device.device_identifier}-{self._sensor_type}"
-
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
@@ -249,6 +112,7 @@ async def async_setup_entry(
     
     async_add_entities(entities)
 
+# noinspection PyAbstractClass
 class BusproSensor(SensorEntity):
     """Representation of a HDL Buspro Sensor."""
 
