@@ -18,7 +18,7 @@ from homeassistant.const import (
     UnitOfTemperature,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, OPERATION_SINGLE_CHANNEL, OPERATION_READ_STATUS
@@ -62,20 +62,23 @@ async def async_setup_entry(
                 gateway,
                 device["subnet_id"],
                 device["device_id"],
+                device["channel"],
                 device["name"],
             )
         )
     
+    _LOGGER.info(f"Добавлено {len(entities)} устройств климат-контроля HDL Buspro")
     async_add_entities(entities)
 
 class BusproClimate(ClimateEntity):
     """Representation of a HDL Buspro Climate device."""
 
-    def __init__(self, gateway, subnet_id: int, device_id: int, name: str):
+    def __init__(self, gateway, subnet_id: int, device_id: int, channel: int, name: str):
         """Initialize the climate device."""
         self._gateway = gateway
         self._subnet_id = subnet_id
         self._device_id = device_id
+        self._channel = channel
         self._name = name
         self._available = True
         
@@ -87,11 +90,41 @@ class BusproClimate(ClimateEntity):
         self._fan_mode = None
         self._attr_target_temperature_high = None
         self._attr_target_temperature_low = None
+        self._attr_has_entity_name = True
+        self._attr_name = f"{self._subnet_id}.{self._device_id}.{self._channel}"
         
         # Default values
         self._min_temp = 16
         self._max_temp = 30
         self._target_temperature_step = 0.5
+        
+        # Registering callbacks
+        self.async_register_callbacks()
+        
+    @callback
+    def async_register_callbacks(self):
+        """Register callbacks to update hass after device was changed."""
+
+        async def after_update_callback(devices):
+            """Call after device was updated."""
+            # Проверяем, есть ли обновления для этого устройства
+            device_key = f"{self._subnet_id}.{self._device_id}.{self._channel}"
+            if device_key in devices:
+                device_data = devices[device_key]
+                if device_data["type"] == "climate":
+                    if "current_temperature" in device_data:
+                        self._current_temperature = device_data["current_temperature"]
+                    if "target_temperature" in device_data:
+                        self._target_temperature = device_data["target_temperature"]
+                        if self._target_temperature is not None:
+                            self._attr_target_temperature_high = self._target_temperature + 1
+                            self._attr_target_temperature_low = self._target_temperature - 1
+                    if "mode" in device_data:
+                        self._hvac_mode = HVAC_MODES.get(device_data["mode"])
+                        self._hvac_action = HVAC_ACTIONS.get(device_data["mode"])
+                    self.async_write_ha_state()
+
+        self._gateway.register_callback(after_update_callback)
 
     @property
     def should_poll(self) -> bool:
@@ -178,9 +211,10 @@ class BusproClimate(ClimateEntity):
             await self._gateway.send_message(
                 [self._subnet_id, self._device_id],
                 [OPERATION_SINGLE_CHANNEL],
-                [1, int(temperature * 10)]  # Temperature is sent as integer (multiplied by 10)
+                [self._channel, int(temperature * 10)]  # Temperature is sent as integer (multiplied by 10)
             )
             self._target_temperature = temperature
+            _LOGGER.debug(f"Установлена целевая температура {self._name}: {temperature}°C")
             self.async_write_ha_state()
         elif ATTR_TARGET_TEMP_HIGH in kwargs or ATTR_TARGET_TEMP_LOW in kwargs:
             high = kwargs.get(ATTR_TARGET_TEMP_HIGH)
@@ -198,8 +232,9 @@ class BusproClimate(ClimateEntity):
                 await self._gateway.send_message(
                     [self._subnet_id, self._device_id],
                     [OPERATION_SINGLE_CHANNEL],
-                    [1, int(avg_temp * 10)]
+                    [self._channel, int(avg_temp * 10)]
                 )
+                _LOGGER.debug(f"Установлен диапазон температур {self._name}: {low}-{high}°C (среднее: {avg_temp}°C)")
             
             self.async_write_ha_state()
 
@@ -214,18 +249,21 @@ class BusproClimate(ClimateEntity):
             await self._gateway.send_message(
                 [self._subnet_id, self._device_id],
                 [OPERATION_SINGLE_CHANNEL],
-                [2, hdl_mode]  # Channel 2 for mode
+                [self._channel + 1, hdl_mode]  # Next channel for mode
             )
             self._hvac_mode = hvac_mode
+            _LOGGER.debug(f"Установлен режим климата {self._name}: {hvac_mode}")
             self.async_write_ha_state()
 
     async def async_turn_off(self) -> None:
         """Turn off the climate device."""
         await self.async_set_hvac_mode(HVACMode.OFF)
+        _LOGGER.debug(f"Выключен климат-контроль {self._name}")
 
     async def async_turn_on(self) -> None:
         """Turn on the climate device."""
         await self.async_set_hvac_mode(HVACMode.HEAT)
+        _LOGGER.debug(f"Включен климат-контроль {self._name} в режиме обогрева")
 
     async def async_update(self) -> None:
         """Fetch new state data for this climate device."""
@@ -234,18 +272,18 @@ class BusproClimate(ClimateEntity):
             temp_response = await self._gateway.send_message(
                 [self._subnet_id, self._device_id],
                 [OPERATION_READ_STATUS],
-                [1]  # Channel 1 for temperature
+                [self._channel]  # Channel for temperature
             )
             
             # Get mode
             mode_response = await self._gateway.send_message(
                 [self._subnet_id, self._device_id],
                 [OPERATION_READ_STATUS],
-                [2]  # Channel 2 for mode
+                [self._channel + 1]  # Next channel for mode
             )
             
             if temp_response and mode_response:
-                # Temperature comes as integer (multiplied by 10)
+                # Temperature comes as integer (multiplied by a factor of 10)
                 self._current_temperature = temp_response[0] / 10
                 self._target_temperature = temp_response[1] / 10 if len(temp_response) > 1 else None
                 
@@ -260,8 +298,9 @@ class BusproClimate(ClimateEntity):
                 self._hvac_action = HVAC_ACTIONS.get(hdl_mode)
                 
                 self._available = True
+                _LOGGER.debug(f"Обновлено состояние климата {self._name}: {self._current_temperature}°C, режим: {self._hvac_mode}")
         except Exception as err:
-            _LOGGER.error("Error updating climate state: %s", err)
+            _LOGGER.error(f"Ошибка обновления состояния климата {self._name}: {err}")
             self._available = False
         finally:
             self.async_write_ha_state()
@@ -269,4 +308,4 @@ class BusproClimate(ClimateEntity):
     @property
     def unique_id(self) -> str:
         """Return a unique ID."""
-        return f"climate_{self._subnet_id}_{self._device_id}"
+        return f"climate_{self._subnet_id}_{self._device_id}_{self._channel}"

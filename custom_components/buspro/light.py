@@ -15,7 +15,6 @@ from homeassistant.components.light import (
     ColorMode, 
     PLATFORM_SCHEMA, 
     ATTR_BRIGHTNESS,
-    LightEntityFeature
 )
 from homeassistant.const import (CONF_NAME, CONF_DEVICES)
 from homeassistant.core import callback
@@ -24,7 +23,7 @@ from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
-from .const import DOMAIN
+from .const import DOMAIN, OPERATION_SINGLE_CHANNEL, OPERATION_READ_STATUS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -62,10 +61,12 @@ async def async_setup_entry(
                 gateway,
                 device["subnet_id"],
                 device["device_id"],
+                device["channel"],
                 device["name"],
             )
         )
     
+    _LOGGER.info(f"Добавлено {len(entities)} устройств освещения HDL Buspro")
     async_add_entities(entities)
 
 
@@ -73,26 +74,35 @@ async def async_setup_entry(
 class BusproLight(LightEntity):
     """Representation of a HDL Buspro Light."""
 
-    def __init__(self, gateway, subnet_id: int, device_id: int, name: str):
+    def __init__(self, gateway, subnet_id: int, device_id: int, channel: int, name: str):
         """Initialize the light."""
         self._gateway = gateway
         self._subnet_id = subnet_id
         self._device_id = device_id
+        self._channel = channel
         self._name = name
         self._state = None
         self._brightness = None
         self._attr_color_mode = ColorMode.BRIGHTNESS
         self._attr_supported_color_modes = {ColorMode.BRIGHTNESS}
+        self._attr_has_entity_name = True
+        self._attr_name = f"{self._subnet_id}.{self._device_id}.{self._channel}"
         self.async_register_callbacks()
 
     @callback
     def async_register_callbacks(self):
         """Register callbacks to update hass after device was changed."""
 
-        # noinspection PyUnusedLocal
-        async def after_update_callback(device):
+        async def after_update_callback(devices):
             """Call after device was updated."""
-            self.async_write_ha_state()
+            # Проверяем, есть ли обновления для этого устройства
+            device_key = f"{self._subnet_id}.{self._device_id}.{self._channel}"
+            if device_key in devices:
+                device_data = devices[device_key]
+                if device_data["type"] == "light":
+                    self._state = device_data["state"]
+                    self._brightness = int(device_data["brightness"] * 255 / 100)  # Convert 0-100 to 0-255
+                    self.async_write_ha_state()
 
         self._gateway.register_callback(after_update_callback)
 
@@ -119,7 +129,7 @@ class BusproLight(LightEntity):
     @property
     def is_on(self) -> bool:
         """Return true if light is on."""
-        return self._state
+        return self._state if self._state is not None else False
 
     @property
     def supported_features(self) -> int:
@@ -137,41 +147,46 @@ class BusproLight(LightEntity):
         
         await self._gateway.send_message(
             [self._subnet_id, self._device_id],
-            [0x0031],  # Single channel control
-            [1, hdl_brightness]  # Channel 1, brightness value
+            [OPERATION_SINGLE_CHANNEL],
+            [self._channel, hdl_brightness]  # Specific channel, brightness value
         )
         
         self._state = True
         self._brightness = brightness
+        _LOGGER.debug(f"Включено устройство {self._name} с яркостью {hdl_brightness}%")
+        self.async_write_ha_state()
 
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
         await self._gateway.send_message(
             [self._subnet_id, self._device_id],
-            [0x0031],  # Single channel control
-            [1, 0]  # Channel 1, brightness 0
+            [OPERATION_SINGLE_CHANNEL],
+            [self._channel, 0]  # Specific channel, brightness 0
         )
         
         self._state = False
         self._brightness = 0
+        _LOGGER.debug(f"Выключено устройство {self._name}")
+        self.async_write_ha_state()
 
     @property
     def unique_id(self):
         """Return the unique id."""
-        return f"{self._subnet_id}_{self._device_id}"
+        return f"light_{self._subnet_id}_{self._device_id}_{self._channel}"
 
     async def async_update(self) -> None:
         """Fetch new state data for this light."""
         try:
             response = await self._gateway.send_message(
                 [self._subnet_id, self._device_id],
-                [0x0032],  # Read status
-                [1]  # Channel 1
+                [OPERATION_READ_STATUS],
+                [self._channel]  # Specific channel
             )
             
             if response:
                 self._state = response[0] > 0
                 # Convert HDL brightness (0-100) to Home Assistant brightness (0-255)
                 self._brightness = int(response[0] * 255 / 100)
+                _LOGGER.debug(f"Обновлено состояние устройства {self._name}: {self._state}, яркость: {response[0]}%")
         except Exception as err:
-            _LOGGER.error("Error updating light state: %s", err)
+            _LOGGER.error(f"Ошибка при обновлении состояния света {self._name}: {err}")

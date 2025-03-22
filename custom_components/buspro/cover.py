@@ -8,7 +8,7 @@ from homeassistant.components.cover import (
     ATTR_POSITION,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from .const import DOMAIN, OPERATION_SINGLE_CHANNEL, OPERATION_READ_STATUS
@@ -33,31 +33,56 @@ async def async_setup_entry(
                 gateway,
                 device["subnet_id"],
                 device["device_id"],
+                device["channel"],
                 device["name"],
             )
         )
     
+    _LOGGER.info(f"Добавлено {len(entities)} устройств жалюзи/штор HDL Buspro")
     async_add_entities(entities)
 
 class BusproCover(CoverEntity):
     """Representation of a HDL Buspro Cover."""
 
-    def __init__(self, gateway, subnet_id: int, device_id: int, name: str):
+    def __init__(self, gateway, subnet_id: int, device_id: int, channel: int, name: str):
         """Initialize the cover."""
         self._gateway = gateway
         self._subnet_id = subnet_id
         self._device_id = device_id
+        self._channel = channel
         self._name = name
         self._position = None
         self._is_closing = None
         self._is_opening = None
         self._available = True
+        self._attr_has_entity_name = True
+        self._attr_name = f"{self._subnet_id}.{self._device_id}.{self._channel}"
         self._attr_supported_features = (
             CoverEntityFeature.OPEN 
             | CoverEntityFeature.CLOSE 
             | CoverEntityFeature.STOP 
             | CoverEntityFeature.SET_POSITION
         )
+        # Добавляем регистрацию обратных вызовов
+        self.async_register_callbacks()
+        
+    @callback
+    def async_register_callbacks(self):
+        """Register callbacks to update hass after device was changed."""
+
+        async def after_update_callback(devices):
+            """Call after device was updated."""
+            # Проверяем, есть ли обновления для этого устройства
+            device_key = f"{self._subnet_id}.{self._device_id}.{self._channel}"
+            if device_key in devices:
+                device_data = devices[device_key]
+                if device_data["type"] == "cover":
+                    self._position = device_data["position"]
+                    self._is_closing = False
+                    self._is_opening = False
+                    self.async_write_ha_state()
+
+        self._gateway.register_callback(after_update_callback)
 
     @property
     def name(self) -> str:
@@ -98,30 +123,36 @@ class BusproCover(CoverEntity):
         await self._gateway.send_message(
             [self._subnet_id, self._device_id],
             [OPERATION_SINGLE_CHANNEL],
-            [1, 100]  # Channel 1, 100% open
+            [self._channel, 100]  # Specific channel, 100% open
         )
         self._is_opening = True
         self._is_closing = False
+        _LOGGER.debug(f"Открываются жалюзи {self._name}")
+        self.async_write_ha_state()
 
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Close the cover."""
         await self._gateway.send_message(
             [self._subnet_id, self._device_id],
             [OPERATION_SINGLE_CHANNEL],
-            [1, 0]  # Channel 1, 0% open (closed)
+            [self._channel, 0]  # Specific channel, 0% open (closed)
         )
         self._is_closing = True
         self._is_opening = False
+        _LOGGER.debug(f"Закрываются жалюзи {self._name}")
+        self.async_write_ha_state()
 
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Stop the cover."""
         await self._gateway.send_message(
             [self._subnet_id, self._device_id],
             [OPERATION_SINGLE_CHANNEL],
-            [1, self._position or 50]  # Keep current position or default to 50%
+            [self._channel, self._position or 50]  # Keep current position or default to 50%
         )
         self._is_closing = False
         self._is_opening = False
+        _LOGGER.debug(f"Остановлены жалюзи {self._name}")
+        self.async_write_ha_state()
 
     async def async_set_cover_position(self, **kwargs: Any) -> None:
         """Move the cover to a specific position."""
@@ -132,8 +163,10 @@ class BusproCover(CoverEntity):
         await self._gateway.send_message(
             [self._subnet_id, self._device_id],
             [OPERATION_SINGLE_CHANNEL],
-            [1, position]
+            [self._channel, position]
         )
+        _LOGGER.debug(f"Установлена позиция жалюзи {self._name}: {position}%")
+        self.async_write_ha_state()
 
     async def async_update(self) -> None:
         """Fetch new state data for this cover."""
@@ -141,7 +174,7 @@ class BusproCover(CoverEntity):
             response = await self._gateway.send_message(
                 [self._subnet_id, self._device_id],
                 [OPERATION_READ_STATUS],
-                [1]  # Channel 1
+                [self._channel]  # Specific channel
             )
             
             if response:
@@ -149,11 +182,12 @@ class BusproCover(CoverEntity):
                 self._is_closing = False
                 self._is_opening = False
                 self._available = True
+                _LOGGER.debug(f"Обновлено состояние жалюзи {self._name}: позиция {self._position}%")
         except Exception as err:
-            _LOGGER.error("Error updating cover state: %s", err)
+            _LOGGER.error(f"Ошибка при обновлении состояния жалюзи {self._name}: {err}")
             self._available = False
 
     @property
     def unique_id(self) -> str:
         """Return a unique ID."""
-        return f"cover_{self._subnet_id}_{self._device_id}" 
+        return f"cover_{self._subnet_id}_{self._device_id}_{self._channel}" 
