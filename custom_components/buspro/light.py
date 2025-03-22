@@ -124,7 +124,9 @@ class BusproLight(LightEntity):
     @property
     def supported_features(self) -> int:
         """Flag supported features."""
-        return LightEntityFeature.BRIGHTNESS
+        # По умолчанию возвращаем 0, так как функциональность яркости 
+        # уже поддерживается через color_mode
+        return 0
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
@@ -157,6 +159,11 @@ class BusproLight(LightEntity):
     def unique_id(self):
         """Return the unique id."""
         return f"{self._subnet_id}_{self._device_id}"
+    
+    @property
+    def entity_id(self):
+        """Return the entity ID for this light."""
+        return f"light.light_{self._subnet_id}_{self._device_id}"
 
     async def async_update(self) -> None:
         """Fetch new state data for this light."""

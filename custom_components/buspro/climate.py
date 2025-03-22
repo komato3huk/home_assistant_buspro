@@ -270,3 +270,8 @@ class BusproClimate(ClimateEntity):
     def unique_id(self) -> str:
         """Return a unique ID."""
         return f"climate_{self._subnet_id}_{self._device_id}"
+        
+    @property
+    def entity_id(self) -> str:
+        """Return the entity ID for this climate device."""
+        return f"climate.climate_{self._subnet_id}_{self._device_id}"

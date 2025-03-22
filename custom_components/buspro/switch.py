@@ -102,3 +102,8 @@ class BusproSwitch(SwitchEntity):
     def unique_id(self):
         """Return the unique id."""
         return self._device.device_identifier
+
+    @property
+    def entity_id(self):
+        """Return the entity ID for this switch."""
+        return f"switch.switch_{self._device.device_identifier}"
