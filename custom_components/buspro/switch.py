@@ -20,7 +20,7 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
-from .const import DOMAIN, OPERATION_SINGLE_CHANNEL, OPERATION_READ_STATUS, SWITCH, OPERATION_WRITE
+from .const import DOMAIN, OPERATION_SINGLE_CHANNEL, OPERATION_READ_STATUS, SWITCH
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -42,45 +42,22 @@ async def async_setup_entry(
     
     entities = []
     
-    # Получаем переключатели из обнаруженных устройств
-    for device in discovery.get_devices_by_type("switch"):
-        subnet_id = device["subnet_id"]
-        device_id = device["device_id"]
-        channels = device.get("channels", 1)
-        device_name = device.get("name", f"Switch {subnet_id}.{device_id}")
-        
-        _LOGGER.info(f"Обнаружен релейный модуль: {device_name} ({subnet_id}.{device_id})")
-        
-        # Для релейных модулей обычно есть несколько каналов
-        for channel in range(1, channels + 1):
-            name = f"{device_name} {channel}" if channels > 1 else device_name
+    # Получение обнаруженных устройств выключателей
+    if SWITCH in discovery.devices:
+        for device in discovery.devices[SWITCH]:
+            subnet_id = device.get("subnet_id")
+            device_id = device.get("device_id")
+            channel = device.get("channel")
+            name = device.get("name")
             
-            entity = BusproSwitch(
-                gateway,
-                subnet_id,
-                device_id,
-                channel,
-                name,
+            _LOGGER.info(f"Добавление релейного выключателя: {name} ({subnet_id}.{device_id}.{channel})")
+            entities.append(
+                BusproSwitch(gateway, subnet_id, device_id, channel, name)
             )
-            entities.append(entity)
-            
-            _LOGGER.debug(f"Добавлен переключатель: {name} ({subnet_id}.{device_id}.{channel})")
-    
-    # Для отладки, если не найдено ни одного переключателя, добавим тестовый
-    if not entities:
-        _LOGGER.info("Добавление тестового переключателя для отладки")
-        test_entity = BusproSwitch(
-            gateway,
-            1,  # subnet_id
-            5,  # device_id
-            1,  # channel
-            "Реле 1.5.1",
-        )
-        entities.append(test_entity)
     
     if entities:
         async_add_entities(entities)
-        _LOGGER.info(f"Добавлено {len(entities)} переключателей HDL Buspro")
+        _LOGGER.info(f"Добавлено {len(entities)} устройств выключателей HDL Buspro")
 
 
 async def async_setup_platform(
@@ -89,15 +66,15 @@ async def async_setup_platform(
     async_add_entities: AddEntitiesCallback,
     discovery_info: Optional[DiscoveryInfoType] = None,
 ) -> None:
-    """Set up the HDL Buspro switch platform with configuration.yaml."""
+    """Set up the HDL Buspro switch platform."""
     # Проверяем, что компонент Buspro настроен
     if DOMAIN not in hass.data:
-        _LOGGER.error("Cannot set up switches - HDL Buspro integration not found")
+        _LOGGER.error("Cannot set up switch - HDL Buspro integration not found")
         return
     
     hdl = hass.data[DOMAIN].get("gateway")
     if not hdl:
-        _LOGGER.error("Cannot set up switches - HDL Buspro gateway not found")
+        _LOGGER.error("Cannot set up switch - HDL Buspro gateway not found")
         return
     
     entities = []
@@ -124,11 +101,11 @@ async def async_setup_platform(
     
     if entities:
         async_add_entities(entities)
-        _LOGGER.info(f"Добавлено {len(entities)} выключателей HDL Buspro из configuration.yaml")
+        _LOGGER.info(f"Добавлено {len(entities)} устройств выключателей HDL Buspro из configuration.yaml")
 
 
 class BusproSwitch(SwitchEntity):
-    """Representation of a HDL Buspro Switch."""
+    """Репрезентация выключателя HDL Buspro."""
 
     def __init__(
         self,
@@ -138,109 +115,110 @@ class BusproSwitch(SwitchEntity):
         channel: int,
         name: str,
     ):
-        """Initialize the switch."""
+        """Инициализация выключателя."""
         self._gateway = gateway
         self._subnet_id = subnet_id
         self._device_id = device_id
         self._channel = channel
         self._name = name
-        
-        # Генерируем уникальный ID
-        self._attr_unique_id = f"switch_{subnet_id}_{device_id}_{channel}"
-        
-        # Состояние переключателя
         self._state = False
         self._available = True
+        # Создаем уникальный ID, включающий все параметры устройства
+        self._unique_id = f"switch_{subnet_id}_{device_id}_{channel}"
         
     @property
     def name(self) -> str:
-        """Return the name of the switch."""
+        """Возвращает имя выключателя."""
         return self._name
         
     @property
     def is_on(self) -> bool:
-        """Return true if switch is on."""
+        """Возвращает true если выключатель включен."""
         return self._state
         
     @property
     def available(self) -> bool:
-        """Return True if entity is available."""
+        """Возвращает True если сущность доступна."""
         return self._available
         
+    @property
+    def unique_id(self) -> str:
+        """Возвращает уникальный ID."""
+        return self._unique_id
+        
     async def async_turn_on(self, **kwargs: Any) -> None:
-        """Turn the switch on."""
-        _LOGGER.debug(f"Включение переключателя {self._subnet_id}.{self._device_id}.{self._channel}")
+        """Включение выключателя."""
+        _LOGGER.info(f"Включение выключателя {self._name} ({self._subnet_id}.{self._device_id}.{self._channel})")
         
-        # Создаем телеграмму для включения переключателя
-        telegram = {
-            "subnet_id": self._subnet_id,
-            "device_id": self._device_id,
-            "operate_code": OPERATION_WRITE,
-            "data": [CMD_SINGLE_CHANNEL, self._channel, 100],  # 100% - включено
-        }
+        # Используем код OPERATION_SINGLE_CHANNEL (0x0031) для включения реле
+        operation_code = OPERATION_SINGLE_CHANNEL
         
-        # Отправляем телеграмму через шлюз
+        # Формируем команду: [channel, value, unused]
+        # value = 100 (полная яркость для релейного выхода, в процентах)
+        data = [self._channel, 100, 0]
+        
         try:
-            await self._gateway.send_telegram(telegram)
+            # Отправляем команду через шлюз
+            response = await self._gateway.send_message(
+                [self._subnet_id, self._device_id, 0, 0],  # target_address
+                [operation_code >> 8, operation_code & 0xFF],  # operation_code
+                data,  # data
+            )
+            
+            # Обновляем состояние
             self._state = True
-            _LOGGER.info(f"Переключатель {self._subnet_id}.{self._device_id}.{self._channel} включен")
-        except Exception as err:
-            _LOGGER.error(f"Ошибка при включении переключателя {self._subnet_id}.{self._device_id}.{self._channel}: {err}")
+            self.async_write_ha_state()
+            
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при включении выключателя {self._name}: {e}")
         
     async def async_turn_off(self, **kwargs: Any) -> None:
-        """Turn the switch off."""
-        _LOGGER.debug(f"Выключение переключателя {self._subnet_id}.{self._device_id}.{self._channel}")
+        """Выключение выключателя."""
+        _LOGGER.info(f"Выключение выключателя {self._name} ({self._subnet_id}.{self._device_id}.{self._channel})")
         
-        # Создаем телеграмму для выключения переключателя
-        telegram = {
-            "subnet_id": self._subnet_id,
-            "device_id": self._device_id,
-            "operate_code": OPERATION_WRITE,
-            "data": [CMD_SINGLE_CHANNEL, self._channel, 0],  # 0% - выключено
-        }
+        # Используем код OPERATION_SINGLE_CHANNEL (0x0031) для выключения реле
+        operation_code = OPERATION_SINGLE_CHANNEL
         
-        # Отправляем телеграмму через шлюз
+        # Формируем команду: [channel, value, unused]
+        # value = 0 (выключено, 0 процентов)
+        data = [self._channel, 0, 0]
+        
         try:
-            await self._gateway.send_telegram(telegram)
+            # Отправляем команду через шлюз
+            response = await self._gateway.send_message(
+                [self._subnet_id, self._device_id, 0, 0],  # target_address
+                [operation_code >> 8, operation_code & 0xFF],  # operation_code
+                data,  # data
+            )
+            
+            # Обновляем состояние
             self._state = False
-            _LOGGER.info(f"Переключатель {self._subnet_id}.{self._device_id}.{self._channel} выключен")
-        except Exception as err:
-            _LOGGER.error(f"Ошибка при выключении переключателя {self._subnet_id}.{self._device_id}.{self._channel}: {err}")
+            self.async_write_ha_state()
+            
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при выключении выключателя {self._name}: {e}")
         
     async def async_update(self) -> None:
-        """Fetch new state data for this switch."""
+        """Получение нового состояния выключателя."""
         try:
-            _LOGGER.debug(f"Обновление состояния переключателя {self._subnet_id}.{self._device_id}.{self._channel}")
+            # Запрашиваем состояние устройства
+            operation_code = OPERATION_READ_STATUS
             
-            # Создаем телеграмму для запроса статуса
-            telegram = {
-                "subnet_id": self._subnet_id,
-                "device_id": self._device_id,
-                "operate_code": CMD_SINGLE_CHANNEL,
-                "data": [self._channel],
-            }
+            # Формируем команду: [channel]
+            data = [self._channel]
             
-            # Отправляем запрос через шлюз
-            response = await self._gateway.send_telegram(telegram)
+            # Отправляем запрос статуса через шлюз
+            response = await self._gateway.send_message(
+                [self._subnet_id, self._device_id, 0, 0],  # target_address
+                [operation_code >> 8, operation_code & 0xFF],  # operation_code
+                data,  # data
+            )
             
-            if response and isinstance(response, dict) and "data" in response and response["data"]:
-                # Обычно первый элемент данных - это текущее состояние канала (0-100%)
-                if len(response["data"]) > 0:
-                    level = response["data"][0]
-                    self._state = level > 0
-                    _LOGGER.debug(f"Получено состояние переключателя {self._subnet_id}.{self._device_id}.{self._channel}: {'включен' if self._state else 'выключен'}")
-                
-                self._available = True
-            else:
-                # Для эмуляции переключателя при отладке
-                if self._subnet_id == 1 and self._device_id == 5 and self._channel == 1:
-                    # Оставляем текущее состояние
-                    _LOGGER.debug(f"Используем текущее состояние для тестового переключателя: {'включен' if self._state else 'выключен'}")
-                    self._available = True
-                else:
-                    _LOGGER.warning(f"Не удалось получить данные от переключателя {self._subnet_id}.{self._device_id}.{self._channel}")
-                    # Не меняем доступность при временной ошибке
+            # Обработка ответа
+            # Это заглушка, так как реальный ответ обрабатывается асинхронно через колбэки
+            # В реальной реализации устанавливаем значение, только если получен ответ
+            self._available = True
             
-        except Exception as err:
-            _LOGGER.error(f"Ошибка при обновлении состояния переключателя {self._subnet_id}.{self._device_id}.{self._channel}: {err}")
-            # Не меняем доступность при временной ошибке
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при обновлении состояния выключателя {self._name}: {e}")
+            self._available = False

@@ -1,28 +1,28 @@
 """
-This component provides cover support for Buspro.
+This component provides cover support for HDL Buspro.
 
 For more details about this platform, please refer to the documentation at
 https://home-assistant.io/components/...
 """
 
 import logging
-from typing import Any, Dict, List, Optional
-import asyncio
+from typing import Any, Dict, Optional
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 from homeassistant.components.cover import (
+    ATTR_POSITION,
+    CoverDeviceClass,
     CoverEntity,
-    PLATFORM_SCHEMA,
     CoverEntityFeature,
 )
-from homeassistant.const import (CONF_NAME, CONF_DEVICES)
+from homeassistant.const import CONF_NAME, CONF_DEVICES
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
-from .const import DOMAIN, OPERATION_WRITE, COVER
+from .const import DOMAIN, OPERATION_CURTAIN_SWITCH, OPERATION_READ_STATUS, COVER
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,21 +30,11 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_DEVICES): {cv.string: cv.string},
 })
 
-DEFAULT_FEATURES = (
-    CoverEntityFeature.OPEN |
-    CoverEntityFeature.CLOSE |
-    CoverEntityFeature.STOP |
-    CoverEntityFeature.SET_POSITION
-)
-
-# HDL Buspro commands for controlling covers
-COMMAND_STOP = 0
-COMMAND_UP = 1
-COMMAND_DOWN = 2
-COMMAND_POSITION = 3
-
-# Коды операций для управления рольставнями
-OPERATION_CURTAIN_CONTROL = 0xE01C
+# Константы для команд управления шторами
+CURTAIN_CMD_STOP = 0  # Остановка движения
+CURTAIN_CMD_UP = 1    # Движение вверх
+CURTAIN_CMD_DOWN = 2  # Движение вниз
+CURTAIN_CMD_POS = 7   # Установка позиции
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -57,7 +47,7 @@ async def async_setup_entry(
     
     entities = []
     
-    # Получение обнаруженных устройств управления рольставнями
+    # Получение обнаруженных устройств штор
     if COVER in discovery.devices:
         for device in discovery.devices[COVER]:
             subnet_id = device.get("subnet_id")
@@ -65,15 +55,14 @@ async def async_setup_entry(
             channel = device.get("channel")
             name = device.get("name")
             
-            _LOGGER.info(f"Добавление устройства управления рольставнями: {name} ({subnet_id}.{device_id}.{channel})")
+            _LOGGER.info(f"Добавление штор: {name} ({subnet_id}.{device_id}.{channel})")
             entities.append(
                 BusproCover(gateway, subnet_id, device_id, channel, name)
             )
     
     if entities:
         async_add_entities(entities)
-        _LOGGER.info(f"Added {len(entities)} HDL Buspro covers")
-
+        _LOGGER.info(f"Добавлено {len(entities)} устройств штор HDL Buspro")
 
 async def async_setup_platform(
     hass: HomeAssistant,
@@ -81,15 +70,15 @@ async def async_setup_platform(
     async_add_entities: AddEntitiesCallback,
     discovery_info: Optional[DiscoveryInfoType] = None,
 ) -> None:
-    """Set up the HDL Buspro cover platform with configuration.yaml."""
+    """Set up the HDL Buspro cover platform."""
     # Проверяем, что компонент Buspro настроен
     if DOMAIN not in hass.data:
-        _LOGGER.error("Cannot set up covers - HDL Buspro integration not found")
+        _LOGGER.error("Cannot set up cover - HDL Buspro integration not found")
         return
     
     hdl = hass.data[DOMAIN].get("gateway")
     if not hdl:
-        _LOGGER.error("Cannot set up covers - HDL Buspro gateway not found")
+        _LOGGER.error("Cannot set up cover - HDL Buspro gateway not found")
         return
     
     entities = []
@@ -109,18 +98,18 @@ async def async_setup_platform(
             _LOGGER.error(f"Неверный формат адреса: {address}. Все части должны быть целыми числами")
             continue
         
-        _LOGGER.debug(f"Добавление устройства управления шторами '{name}' с адресом {subnet_id}.{device_id}.{channel}")
+        _LOGGER.debug(f"Добавление шторы '{name}' с адресом {subnet_id}.{device_id}.{channel}")
         
         entity = BusproCover(hdl, subnet_id, device_id, channel, name)
         entities.append(entity)
     
     if entities:
         async_add_entities(entities)
-        _LOGGER.info(f"Добавлено {len(entities)} устройств управления шторами HDL Buspro из configuration.yaml")
+        _LOGGER.info(f"Добавлено {len(entities)} устройств штор HDL Buspro из configuration.yaml")
 
 
 class BusproCover(CoverEntity):
-    """Representation of a HDL Buspro Cover."""
+    """Представление шторы HDL Buspro."""
 
     def __init__(
         self,
@@ -130,201 +119,198 @@ class BusproCover(CoverEntity):
         channel: int,
         name: str,
     ):
-        """Initialize the cover."""
+        """Инициализация шторы."""
         self._gateway = gateway
         self._subnet_id = subnet_id
         self._device_id = device_id
         self._channel = channel
         self._name = name
-        self._position = None
+        
+        # Состояние шторы
+        self._position = 0  # 0 - закрыто полностью, 100 - открыто полностью
         self._is_opening = False
         self._is_closing = False
         self._available = True
+        
         # Создаем уникальный ID, включающий все параметры устройства
         self._unique_id = f"cover_{subnet_id}_{device_id}_{channel}"
         
-        # Поддерживаемые функции
-        self._attr_supported_features = DEFAULT_FEATURES
+        # Добавляем поддержку операций: открытие, закрытие, стоп, установка позиции
+        self._attr_supported_features = (
+            CoverEntityFeature.OPEN | 
+            CoverEntityFeature.CLOSE | 
+            CoverEntityFeature.STOP | 
+            CoverEntityFeature.SET_POSITION
+        )
+        
+        # Установка типа устройства
+        self._attr_device_class = CoverDeviceClass.CURTAIN
         
     @property
     def name(self) -> str:
-        """Return the name of the cover."""
+        """Возвращает имя шторы."""
         return self._name
         
     @property
-    def available(self) -> bool:
-        """Return True if entity is available."""
-        return self._available
-        
-    @property
-    def current_cover_position(self) -> Optional[int]:
-        """Return current position of cover.
-        
-        None is unknown, 0 is closed, 100 is fully open.
-        """
+    def current_cover_position(self) -> int:
+        """Возвращает текущее положение шторы."""
         return self._position
         
     @property
     def is_opening(self) -> bool:
-        """Return if the cover is opening or not."""
+        """Возвращает True, если шторы в процессе открытия."""
         return self._is_opening
         
     @property
     def is_closing(self) -> bool:
-        """Return if the cover is closing or not."""
+        """Возвращает True, если шторы в процессе закрытия."""
         return self._is_closing
         
     @property
-    def is_closed(self) -> Optional[bool]:
-        """Return if the cover is closed or not."""
-        if self._position is None:
-            return None
+    def is_closed(self) -> bool:
+        """Возвращает True, если шторы полностью закрыты."""
         return self._position == 0
         
     @property
+    def available(self) -> bool:
+        """Возвращает True, если устройство доступно."""
+        return self._available
+        
+    @property
     def unique_id(self) -> str:
-        """Return a unique ID."""
+        """Возвращает уникальный ID."""
         return self._unique_id
         
     async def async_open_cover(self, **kwargs: Any) -> None:
-        """Open the cover."""
-        _LOGGER.info(f"Открываем рольставни: {self._name} ({self._subnet_id}.{self._device_id}.{self._channel})")
+        """Открытие шторы."""
+        _LOGGER.info(f"Открытие шторы {self._name} ({self._subnet_id}.{self._device_id}.{self._channel})")
         
-        # Операция управления шторами, команда UP (1)
-        operation_code = OPERATION_CURTAIN_CONTROL
-        data = [self._channel, COMMAND_UP, 0, 0]  # channel, command, unused1, unused2
+        # Используем код OPERATION_CURTAIN_SWITCH для управления шторами
+        operation_code = OPERATION_CURTAIN_SWITCH
+        
+        # Формируем команду: [channel, command]
+        data = [self._channel, CURTAIN_CMD_UP]
         
         try:
-            await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target address
-                [operation_code >> 8, operation_code & 0xFF],  # operation code
-                data,
+            # Отправляем команду через шлюз
+            response = await self._gateway.send_message(
+                [self._subnet_id, self._device_id, 0, 0],  # target_address
+                [operation_code >> 8, operation_code & 0xFF],  # operation_code
+                data,  # data
             )
             
-            # Обновляем внутреннее состояние
+            # Обновляем состояние
             self._is_opening = True
             self._is_closing = False
             self.async_write_ha_state()
             
-            # Через небольшую задержку обновим состояние, чтобы получить обновленное положение
-            await asyncio.sleep(1)
-            await self.async_update()
         except Exception as e:
-            _LOGGER.error(f"Не удалось открыть рольставни {self._name}: {e}")
-
-    async def async_close_cover(self, **kwargs: Any) -> None:
-        """Close the cover."""
-        _LOGGER.info(f"Закрываем рольставни: {self._name} ({self._subnet_id}.{self._device_id}.{self._channel})")
+            _LOGGER.error(f"Ошибка при открытии шторы {self._name}: {e}")
         
-        # Операция управления шторами, команда DOWN (2)
-        operation_code = OPERATION_CURTAIN_CONTROL
-        data = [self._channel, COMMAND_DOWN, 0, 0]  # channel, command, unused1, unused2
+    async def async_close_cover(self, **kwargs: Any) -> None:
+        """Закрытие шторы."""
+        _LOGGER.info(f"Закрытие шторы {self._name} ({self._subnet_id}.{self._device_id}.{self._channel})")
+        
+        # Используем код OPERATION_CURTAIN_SWITCH для управления шторами
+        operation_code = OPERATION_CURTAIN_SWITCH
+        
+        # Формируем команду: [channel, command]
+        data = [self._channel, CURTAIN_CMD_DOWN]
         
         try:
-            await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target address
-                [operation_code >> 8, operation_code & 0xFF],  # operation code
-                data,
+            # Отправляем команду через шлюз
+            response = await self._gateway.send_message(
+                [self._subnet_id, self._device_id, 0, 0],  # target_address
+                [operation_code >> 8, operation_code & 0xFF],  # operation_code
+                data,  # data
             )
             
-            # Обновляем внутреннее состояние
+            # Обновляем состояние
             self._is_opening = False
             self._is_closing = True
             self.async_write_ha_state()
             
-            # Через небольшую задержку обновим состояние, чтобы получить обновленное положение
-            await asyncio.sleep(1)
-            await self.async_update()
         except Exception as e:
-            _LOGGER.error(f"Не удалось закрыть рольставни {self._name}: {e}")
-
-    async def async_stop_cover(self, **kwargs: Any) -> None:
-        """Stop the cover movement."""
-        _LOGGER.info(f"Останавливаем рольставни: {self._name} ({self._subnet_id}.{self._device_id}.{self._channel})")
+            _LOGGER.error(f"Ошибка при закрытии шторы {self._name}: {e}")
         
-        # Операция управления шторами, команда STOP (0)
-        operation_code = OPERATION_CURTAIN_CONTROL
-        data = [self._channel, COMMAND_STOP, 0, 0]  # channel, command, unused1, unused2
+    async def async_stop_cover(self, **kwargs: Any) -> None:
+        """Остановка шторы."""
+        _LOGGER.info(f"Остановка шторы {self._name} ({self._subnet_id}.{self._device_id}.{self._channel})")
+        
+        # Используем код OPERATION_CURTAIN_SWITCH для управления шторами
+        operation_code = OPERATION_CURTAIN_SWITCH
+        
+        # Формируем команду: [channel, command]
+        data = [self._channel, CURTAIN_CMD_STOP]
         
         try:
-            await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target address
-                [operation_code >> 8, operation_code & 0xFF],  # operation code
-                data,
+            # Отправляем команду через шлюз
+            response = await self._gateway.send_message(
+                [self._subnet_id, self._device_id, 0, 0],  # target_address
+                [operation_code >> 8, operation_code & 0xFF],  # operation_code
+                data,  # data
             )
             
-            # Обновляем внутреннее состояние
+            # Обновляем состояние
             self._is_opening = False
             self._is_closing = False
             self.async_write_ha_state()
             
-            # Через небольшую задержку обновим состояние, чтобы получить обновленное положение
-            await asyncio.sleep(1)
-            await self.async_update()
         except Exception as e:
-            _LOGGER.error(f"Не удалось остановить рольставни {self._name}: {e}")
-
+            _LOGGER.error(f"Ошибка при остановке шторы {self._name}: {e}")
+        
     async def async_set_cover_position(self, **kwargs: Any) -> None:
-        """Set the cover position."""
-        position = kwargs.get("position")
-        if position is None:
-            _LOGGER.error(f"Не указано положение для рольставни {self._name}")
+        """Установка позиции шторы."""
+        if ATTR_POSITION not in kwargs:
             return
+            
+        position = kwargs[ATTR_POSITION]
+        _LOGGER.info(f"Установка позиции шторы {self._name} ({self._subnet_id}.{self._device_id}.{self._channel}) на {position}%")
         
-        _LOGGER.info(f"Устанавливаем положение рольставни {self._name} на {position}%")
+        # Используем код OPERATION_CURTAIN_SWITCH для управления шторами
+        operation_code = OPERATION_CURTAIN_SWITCH
         
-        # HDL Buspro использует обратный процент (0% = полностью открыто, 100% = полностью закрыто)
-        # Home Assistant использует: 0% = полностью закрыто, 100% = полностью открыто
-        # Поэтому инвертируем значение
-        hdl_position = 100 - position
-        
-        # Операция управления шторами, команда POSITION (3)
-        operation_code = OPERATION_CURTAIN_CONTROL
-        data = [self._channel, COMMAND_POSITION, hdl_position, 0]  # channel, command, position, unused
+        # Формируем команду: [channel, command, position]
+        data = [self._channel, CURTAIN_CMD_POS, position]
         
         try:
-            await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target address
-                [operation_code >> 8, operation_code & 0xFF],  # operation code
-                data,
+            # Отправляем команду через шлюз
+            response = await self._gateway.send_message(
+                [self._subnet_id, self._device_id, 0, 0],  # target_address
+                [operation_code >> 8, operation_code & 0xFF],  # operation_code
+                data,  # data
             )
             
-            # Обновляем внутреннее состояние
+            # Обновляем состояние
             self._position = position
             self._is_opening = False
             self._is_closing = False
             self.async_write_ha_state()
             
-            # Через небольшую задержку обновим состояние, чтобы получить обновленное положение
-            await asyncio.sleep(1)
-            await self.async_update()
         except Exception as e:
-            _LOGGER.error(f"Не удалось установить положение рольставни {self._name}: {e}")
-
+            _LOGGER.error(f"Ошибка при установке позиции шторы {self._name}: {e}")
+        
     async def async_update(self) -> None:
-        """Update the cover state."""
+        """Получение нового состояния шторы."""
         try:
-            # Запрос состояния устройства
-            operation_code = OPERATION_CURTAIN_CONTROL
-            data = [self._channel, 0, 0, 0]  # channel, запрос состояния
+            # Запрашиваем состояние устройства
+            operation_code = OPERATION_READ_STATUS
             
-            # Отправляем запрос на получение состояния
+            # Формируем команду: [channel]
+            data = [self._channel]
+            
+            # Отправляем запрос статуса через шлюз
             response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target address
-                [operation_code >> 8, operation_code & 0xFF],  # operation code
-                data,
+                [self._subnet_id, self._device_id, 0, 0],  # target_address
+                [operation_code >> 8, operation_code & 0xFF],  # operation_code
+                data,  # data
             )
             
-            if response and len(response) >= 4:
-                # HDL Buspro использует обратный процент (0% = полностью открыто, 100% = полностью закрыто)
-                # Home Assistant использует: 0% = полностью закрыто, 100% = полностью открыто
-                hdl_position = response[2]  # Третий байт содержит положение
-                self._position = 100 - hdl_position
-                self._is_opening = False
-                self._is_closing = False
-                self._available = True
-            else:
-                _LOGGER.warning(f"Неверный ответ от рольставни {self._name}: {response}")
+            # Обработка ответа
+            # Это заглушка, так как реальный ответ обрабатывается асинхронно через колбэки
+            # В реальной реализации устанавливаем значение, только если получен ответ
+            self._available = True
+            
         except Exception as e:
-            _LOGGER.error(f"Ошибка при обновлении состояния рольставни {self._name}: {e}")
+            _LOGGER.error(f"Ошибка при обновлении состояния шторы {self._name}: {e}")
             self._available = False 

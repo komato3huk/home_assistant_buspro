@@ -95,36 +95,75 @@ class BusproGateway:
         """Return True if gateway is connected."""
         return self._connected
 
-    async def send_message(
-        self,
-        target_address: List[int],
-        operation_code: List[int],
-        data: List[int],
-    ) -> Optional[List[int]]:
-        """Send a message to a device and return the response."""
-        if not self._connected:
-            _LOGGER.error("Cannot send message: Gateway not connected")
-            return None
+    async def send_message(self, target_address, operation_code, data):
+        """Отправка сообщения устройству HDL Buspro.
+        
+        Args:
+            target_address: Список [subnet_id, device_id, типовое значение 0, типовое значение 0]
+            operation_code: Список [старший байт кода операции, младший байт]
+            data: Список данных команды
             
+        Returns:
+            Ответ от устройства или None в случае ошибки
+        """
         try:
-            # Извлекаем subnet_id и device_id из target_address
+            if not target_address or len(target_address) < 2:
+                _LOGGER.error("Необходимо указать subnet_id и device_id в target_address")
+                return None
+                
+            if not operation_code or len(operation_code) < 2:
+                _LOGGER.error("Необходимо указать код операции (2 байта)")
+                return None
+            
             subnet_id = target_address[0]
             device_id = target_address[1]
             
-            # Преобразуем код операции из списка в значение
-            operation = operation_code[0]
+            # Формируем заголовок HDL сообщения
+            header = bytearray([0x48, 0x44, 0x4C, 0x4D, 0x49, 0x52, 0x41, 0x43, 0x4C, 0x45, 0x42, 0x45, 0x41])
             
-            # Отправляем сообщение используя send_hdl_command
-            success = self.send_hdl_command(subnet_id, device_id, operation, data)
-            if success:
-                self._last_update = time.time()
-                # В данной реализации просто возвращаем данные как ответ,
-                # так как мы не ожидаем синхронного ответа от устройства
-                # Реальные данные придут асинхронно через UDP
-                return data
-            return None
-        except Exception as err:
-            _LOGGER.error("Failed to send message: %s", err)
+            # Подготавливаем команду
+            command = bytearray([
+                0x00,  # Наш subnet_id (всегда 0 для контроллера)
+                subnet_id,  # Subnet ID получателя
+                0x01,  # Наш device ID (всегда 1 для контроллера)
+                device_id,  # Device ID получателя
+                operation_code[0],  # Старший байт кода операции
+                operation_code[1]   # Младший байт кода операции
+            ])
+            
+            # Добавляем дополнительные данные
+            if data:
+                if isinstance(data, list):
+                    command.extend(data)
+                else:
+                    command.append(data)
+            
+            # Формируем полное сообщение
+            message = header + command
+            
+            # Логируем данные отправки
+            op_code_int = (operation_code[0] << 8) | operation_code[1]
+            _LOGGER.info(f"Отправка команды 0x{op_code_int:04X} для устройства {subnet_id}.{device_id} через шлюз {self.gateway_host}:{self.gateway_port}")
+            _LOGGER.debug(f"Сообщение: {message.hex()}")
+            
+            # Отправляем сообщение через UDP
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            
+            sock.sendto(message, (self.gateway_host, self.gateway_port))
+            _LOGGER.debug(f"Сообщение отправлено")
+            
+            # Ждем ответа - STUB, в реальной имплементации здесь должно быть ожидание ответа
+            # с соответствующим timeout
+            await asyncio.sleep(0.1)
+            
+            sock.close()
+            
+            # Возвращаем заглушку с данными
+            return data
+            
+        except Exception as ex:
+            _LOGGER.error(f"Ошибка при отправке сообщения: {ex}")
             return None
 
     async def _process_message(self, data):
