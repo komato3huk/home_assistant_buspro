@@ -125,6 +125,17 @@ class BusproGateway:
         self._running = False
         _LOGGER.info(f"Шлюз HDL Buspro остановлен")
 
+    async def _polling_loop(self):
+        """Polling loop for devices."""
+        try:
+            _LOGGER.info(f"Запуск цикла опроса устройств с интервалом {self.poll_interval} секунд")
+            poll_interval = timedelta(seconds=self.poll_interval)
+            await self._poll_devices(poll_interval)
+        except asyncio.CancelledError:
+            _LOGGER.debug("Цикл опроса устройств остановлен")
+        except Exception as e:
+            _LOGGER.error(f"Ошибка в цикле опроса устройств: {e}")
+
     @property
     def connected(self) -> bool:
         """Return True if gateway is connected."""
