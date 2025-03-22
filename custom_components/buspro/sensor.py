@@ -18,8 +18,6 @@ from homeassistant.const import (
     CONF_ADDRESS, 
     CONF_TYPE, 
     CONF_UNIT_OF_MEASUREMENT,
-    ILLUMINANCE, 
-    TEMPERATURE, 
     CONF_DEVICE_CLASS, 
     CONF_SCAN_INTERVAL,
     UnitOfTemperature,

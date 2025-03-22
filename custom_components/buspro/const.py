@@ -9,7 +9,7 @@ from homeassistant.components.sensor import (
 from homeassistant.const import (
     UnitOfTemperature,
     PERCENTAGE,
-    UnitOfIlluminance,
+    LIGHT_LUX,
     UnitOfTime,
 )
 
@@ -72,7 +72,7 @@ SENSOR_TYPES = {
         "name": "Illuminance",
         "device_class": SensorDeviceClass.ILLUMINANCE,
         "state_class": SensorStateClass.MEASUREMENT,
-        "unit": UnitOfIlluminance.LUX,
+        "unit": LIGHT_LUX,
         "multiplier": 1.0,
         "icon": "mdi:brightness-5",
     },
