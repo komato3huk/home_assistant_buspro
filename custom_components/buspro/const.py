@@ -32,6 +32,10 @@ DEFAULT_HOST = "192.168.1.1"
 DEFAULT_PORT = 6000
 DEFAULT_TIMEOUT = 3  # Тайм-аут запросов в секундах
 DEFAULT_POLL_INTERVAL = 30  # Интервал опроса устройств в секундах
+DEFAULT_DEVICE_SUBNET_ID = 1
+DEFAULT_DEVICE_ID = 1
+DEFAULT_GATEWAY_HOST = "192.168.1.1"
+DEFAULT_GATEWAY_PORT = 6000
 
 # Базовые коды операций для протокола HDL Buspro
 OPERATION_READ_STATUS = 0x0031  # Чтение состояния устройства
@@ -131,13 +135,6 @@ SENSOR_TYPE_STRINGS = {
     "temperature": SENSOR_TYPE_TEMPERATURE,
     "humidity": SENSOR_TYPE_HUMIDITY,
     "illuminance": SENSOR_TYPE_ILLUMINANCE
-}
-
-# Таблица соответствия типов сенсоров и их единиц измерения
-SENSOR_TYPES = {
-    SENSOR_TYPE_TEMPERATURE: {"name": "Temperature", "unit": "°C"},
-    SENSOR_TYPE_HUMIDITY: {"name": "Humidity", "unit": "%"},
-    SENSOR_TYPE_ILLUMINANCE: {"name": "Illuminance", "unit": "lx"}
 }
 
 # Аттрибуты устройств
