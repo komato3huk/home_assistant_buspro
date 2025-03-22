@@ -53,11 +53,32 @@ class BusproDiscovery:
 
         _LOGGER.info(f"Начинаем поиск устройств HDL Buspro в подсети {subnet_id}...")
 
-        # В реальной имплементации здесь будет отправка discovery-пакетов через UDP
-        # и анализ ответов от устройств
+        # Очищаем предыдущие результаты обнаружения
+        for device_type in self.devices:
+            self.devices[device_type] = []
 
-        # Пока используем симуляцию обнаружения устройств
-        await self._simulated_discovery(subnet_id)
+        # Запускаем реальное обнаружение устройств
+        try:
+            # Отправляем запрос обнаружения для каждой подсети от 1 до 254
+            for current_subnet in range(1, 255):
+                success = await self.send_discovery_packet(current_subnet)
+                if success:
+                    _LOGGER.debug(f"Запрос обнаружения отправлен в подсеть {current_subnet}")
+                else:
+                    _LOGGER.warning(f"Не удалось отправить запрос обнаружения в подсеть {current_subnet}")
+                
+                # Делаем небольшую паузу между запросами
+                await asyncio.sleep(0.1)
+            
+            # Даем время устройствам ответить
+            _LOGGER.info(f"Ожидаем ответы от устройств ({timeout} сек)...")
+            await asyncio.sleep(timeout)
+        
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при обнаружении устройств: {e}")
+            # Если произошла ошибка, используем симуляцию как запасной вариант
+            _LOGGER.warning("Использую симуляцию обнаружения устройств в качестве запасного варианта")
+            await self._simulated_discovery(subnet_id)
 
         # Логируем результаты обнаружения
         total_devices = sum(len(devices) for devices in self.devices.values())
@@ -65,6 +86,8 @@ class BusproDiscovery:
         for device_type, devices in self.devices.items():
             if devices:
                 _LOGGER.info(f"- {device_type}: {len(devices)}")
+                for device in devices:
+                    _LOGGER.info(f"  * {device.get('name', 'Unnamed')} ({device.get('subnet_id')}.{device.get('device_id')}.{device.get('channel', 0)})")
 
         # Вызываем коллбеки для уведомления о завершении обнаружения
         for callback in self._callbacks:
@@ -260,81 +283,284 @@ class BusproDiscovery:
             _LOGGER.error(f"Ошибка при отправке discovery-пакета: {err}")
             return False 
 
-    def _process_discovery_response(self, subnet_id: int, device_id: int, device_type: int, discovery_data: bytes) -> None:
-        """Process discovery response from a device."""
-        try:
-            _LOGGER.debug(f"Обработка ответа обнаружения от устройства {subnet_id}.{device_id}, тип: 0x{device_type:X}")
-            
-            # Получаем модель устройства и другие параметры из данных
-            model = "HDL"  # По умолчанию
-            
-            # Определяем тип устройства на основе device_type
-            if device_type == 0x0001:  # Пример: Реле
-                self._add_device_to_type(SWITCH, subnet_id, device_id, model=model)
-                # Добавляем несколько каналов для устройства
-                for channel in range(1, 5):  # Предполагаем 4 канала
-                    self._add_device_to_type(SWITCH, subnet_id, device_id, channel=channel, model=model)
-            elif device_type == 0x0002:  # Пример: Диммер
-                self._add_device_to_type(LIGHT, subnet_id, device_id, model=model)
-                # Добавляем несколько каналов для устройства
-                for channel in range(1, 3):  # Предполагаем 2 канала
-                    self._add_device_to_type(LIGHT, subnet_id, device_id, channel=channel, model=model)
-            elif device_type == 0x0003:  # Пример: Контроллер штор
-                self._add_device_to_type(COVER, subnet_id, device_id, model=model)
-                # Обычно один канал
-                self._add_device_to_type(COVER, subnet_id, device_id, channel=1, model=model)
-            elif device_type == 0x0004:  # Пример: Термостат
-                self._add_device_to_type(CLIMATE, subnet_id, device_id, model=model)
-                # Обычно один канал
-                self._add_device_to_type(CLIMATE, subnet_id, device_id, channel=1, model=model)
-            elif device_type == 0x0005:  # Пример: Сенсор
-                self._add_device_to_type(SENSOR, subnet_id, device_id, model=model)
-                # Различные типы сенсоров
-                self._add_device_to_type(SENSOR, subnet_id, device_id, channel=1, type="temperature", model=model)
-                self._add_device_to_type(SENSOR, subnet_id, device_id, channel=2, type="humidity", model=model)
-                self._add_device_to_type(SENSOR, subnet_id, device_id, channel=3, type="illuminance", model=model)
-                # Сенсор движения как бинарный сенсор
-                self._add_device_to_type(BINARY_SENSOR, subnet_id, device_id, channel=1, type="motion", model=model)
-            else:
-                _LOGGER.debug(f"Неизвестный тип устройства: 0x{device_type:X} для {subnet_id}.{device_id}")
-                
-        except Exception as ex:
-            _LOGGER.error(f"Ошибка при обработке ответа обнаружения от {subnet_id}.{device_id}: {ex}")
-            
-    def _add_device_to_type(self, device_type: str, subnet_id: int, device_id: int, channel: int = None, type: str = None, model: str = None) -> None:
-        """Add device to specific type list."""
-        # Проверяем, существует ли уже устройство с таким адресом
-        device_exists = False
-        for device in self.devices[device_type]:
-            if device["subnet_id"] == subnet_id and device["device_id"] == device_id:
-                if channel is not None and device.get("channel") == channel:
-                    device_exists = True
-                    break
+    def _process_discovery_response(self, subnet_id: int, device_id: int, device_type: int, data: list) -> None:
+        """Process a discovery response from a device.
         
-        if not device_exists:
-            device_info = {
+        Args:
+            subnet_id: Subnet ID устройства
+            device_id: Device ID устройства
+            device_type: Тип устройства (из данных ответа)
+            data: Данные ответа
+        """
+        _LOGGER.debug(f"Обработка ответа на запрос обнаружения от устройства {subnet_id}.{device_id}, тип: 0x{device_type:04X}")
+        
+        # Определяем модель и название устройства на основе его типа
+        model = self._get_model_by_type(device_type)
+        base_name = f"HDL {subnet_id}.{device_id}"
+        
+        # Определяем тип устройства и количество каналов
+        device_info = self._classify_device_by_type(device_type, subnet_id, device_id, model, base_name)
+        
+        if device_info:
+            # Добавляем обнаруженное устройство в соответствующий список
+            device_category = device_info["category"]
+            channels = device_info["channels"]
+            
+            # Для многоканальных устройств добавляем каждый канал как отдельное устройство
+            for channel in range(1, channels + 1):
+                channel_device = {
+                    "subnet_id": subnet_id,
+                    "device_id": device_id,
+                    "channel": channel,
+                    "name": f"{base_name} CH{channel}",
+                    "model": model,
+                    "type": device_info.get("sensor_type", None),
+                    "device_type": device_type
+                }
+                
+                if device_category in self.devices:
+                    self.devices[device_category].append(channel_device)
+                    _LOGGER.debug(f"Добавлено устройство {device_category}: {channel_device['name']}")
+
+    def _get_model_by_type(self, device_type: int) -> str:
+        """Получить модель устройства по его типу."""
+        # Мапинг известных типов устройств на модели
+        model_map = {
+            # Панели управления и DLP
+            0x0010: "HDL-MPL8.48",        # 8-кнопочная панель
+            0x0011: "HDL-MPL4.48",        # 4-кнопочная панель
+            0x0012: "HDL-MPT4.46",        # 4-кнопочная сенсорная панель
+            0x0013: "HDL-MPE04.48",       # 4-кнопочная европейская панель
+            0x0014: "HDL-MP2B.48",        # 2-кнопочная панель
+            0x0028: "HDL-DLP",            # DLP панель
+            0x002A: "HDL-DLP-EU",         # Европейская DLP панель
+            
+            # Контроллеры климата
+            0x0073: "HDL-MFHC01.431",     # Контроллер теплого пола
+            0x0174: "HDL-MPWPID01.48",    # Модуль управления вентиляторами (фанкойлами)
+            0x0270: "HDL-MAC01.331",      # Модуль управления кондиционерами
+            
+            # Модули освещения
+            0x0178: "HDL-MPDI06.40K",     # 6-канальный модуль диммера
+            0x0251: "HDL-MD0X04.40",      # 4-канальный модуль диммера для светодиодов
+            0x0254: "HDL-MLED02.40K",     # 2-канальный модуль управления LED
+            0x0255: "HDL-MLED01.40K",     # 1-канальный модуль управления LED
+            
+            # Модули штор/роллет
+            0x0180: "HDL-MW02.431",       # 2-канальный модуль управления шторами/жалюзи
+            0x0182: "HDL-MW04.431",       # 4-канальный модуль управления шторами/жалюзи
+            
+            # Реле
+            0x0188: "HDL-MR0810.433",     # 8-канальный релейный модуль 10A
+            0x0189: "HDL-MR1610.431",     # 16-канальный релейный модуль 10A
+            0x018A: "HDL-MR0416.432",     # 4-канальный релейный модуль 16A
+            
+            # Сенсоры и мультисенсоры
+            0x018C: "HDL-MSPU05.4C",      # Мультисенсор (движение, освещенность, ИК)
+            0x018D: "HDL-MS05M.4C",       # Сенсор движения
+            0x018E: "HDL-MS12.2C",        # 12-в-1 мультисенсор
+            
+            # Шлюзы и интерфейсы
+            0x0192: "HDL-MBUS01.431",     # HDL Buspro интерфейс
+            0x0195: "HDL-MNETC.431",      # Ethernet-HDL шлюз
+
+            # Специальные и неизвестные типы 
+            0xFFFE: "HDL-Custom",         # Кастомное устройство
+            0xFFFF: "HDL-Unknown",        # Неизвестное устройство
+        }
+        
+        return model_map.get(device_type, f"HDL-Unknown-0x{device_type:04X}")
+
+    def _classify_device_by_type(self, device_type: int, subnet_id: int, device_id: int, model: str, name: str) -> Dict[str, Any]:
+        """Классифицировать устройство по его типу."""
+        # Определяем категорию устройства и количество каналов на основе типа
+        
+        # DLP панели и интерфейсы управления    
+        if device_type in [0x0028, 0x002A]:  # DLP панели
+            # Добавляем сенсор температуры для DLP
+            temp_device = {
                 "subnet_id": subnet_id,
                 "device_id": device_id,
-                "model": model or "HDL",
+                "channel": 1,
+                "name": f"{name} Temp",
+                "model": model,
+                "type": "temperature",
+            }
+            self.devices[SENSOR].append(temp_device)
+            
+            # Добавляем универсальные переключатели для DLP
+            for i in range(1, 13):  # 12 страниц кнопок
+                button_device = {
+                    "subnet_id": subnet_id,
+                    "device_id": device_id,
+                    "channel": 100 + i,  # Универсальные переключатели начинаются с 100
+                    "name": f"{name} Button {i}",
+                    "model": model,
+                    "type": "universal_switch",
+                }
+                self.devices[BINARY_SENSOR].append(button_device)
+            
+            # Возвращаем климат-контроль как основной тип устройства
+            return {
+                "category": CLIMATE,
+                "channels": 1,
+            }
+        
+        # Диммеры освещения
+        elif device_type in [0x0178, 0x0251, 0x0254, 0x0255]:
+            # Определяем количество каналов по типу устройства
+            channels_map = {
+                0x0178: 6,  # MPDI06.40K - 6 каналов
+                0x0251: 4,  # MD0X04.40 - 4 канала
+                0x0254: 2,  # MLED02.40K - 2 канала
+                0x0255: 1,  # MLED01.40K - 1 канал
+            }
+            return {
+                "category": LIGHT,
+                "channels": channels_map.get(device_type, 1),
+            }
+        
+        # Релейные модули (выключатели)
+        elif device_type in [0x0188, 0x0189, 0x018A]:
+            # Определяем количество каналов по типу устройства
+            channels_map = {
+                0x0188: 8,   # MR0810.433 - 8 каналов
+                0x0189: 16,  # MR1610.431 - 16 каналов
+                0x018A: 4,   # MR0416.432 - 4 канала
+            }
+            return {
+                "category": SWITCH,
+                "channels": channels_map.get(device_type, 8),
+            }
+        
+        # Модули управления шторами/жалюзи
+        elif device_type in [0x0180, 0x0182]:
+            # Определяем количество каналов по типу устройства
+            channels_map = {
+                0x0180: 2,  # MW02.431 - 2 канала
+                0x0182: 4,  # MW04.431 - 4 канала
+            }
+            return {
+                "category": COVER,
+                "channels": channels_map.get(device_type, 2),
+            }
+        
+        # Модули управления системами отопления/охлаждения
+        elif device_type in [0x0073, 0x0174, 0x0270]:
+            # Определяем количество каналов по типу устройства
+            channels_map = {
+                0x0073: 4,  # MFHC01.431 - до 4-х зон
+                0x0174: 1,  # MPWPID01.48 - 1 канал
+                0x0270: 1,  # MAC01.331 - 1 канал
             }
             
-            if channel is not None:
-                device_info["channel"] = channel
+            # Добавляем сенсоры температуры для этих устройств
+            temp_device = {
+                "subnet_id": subnet_id,
+                "device_id": device_id,
+                "channel": 1,
+                "name": f"{name} Temp",
+                "model": model,
+                "type": "temperature",
+            }
+            self.devices[SENSOR].append(temp_device)
+            
+            return {
+                "category": CLIMATE,
+                "channels": channels_map.get(device_type, 1),
+            }
+        
+        # Мультисенсоры
+        elif device_type in [0x018C, 0x018D, 0x018E]:
+            # Добавляем сенсор движения
+            motion_device = {
+                "subnet_id": subnet_id,
+                "device_id": device_id,
+                "channel": 1,
+                "name": f"{name} Motion",
+                "model": model,
+                "type": "motion",
+            }
+            self.devices[BINARY_SENSOR].append(motion_device)
+            
+            # Добавляем сенсор освещенности
+            lux_device = {
+                "subnet_id": subnet_id,
+                "device_id": device_id,
+                "channel": 2,
+                "name": f"{name} Lux",
+                "model": model,
+                "type": "illuminance",
+            }
+            self.devices[SENSOR].append(lux_device)
+            
+            # Для расширенного мультисенсора добавляем дополнительные сенсоры
+            if device_type == 0x018E:  # MS12.2C
+                # Добавляем сенсор температуры
+                temp_device = {
+                    "subnet_id": subnet_id,
+                    "device_id": device_id,
+                    "channel": 3,
+                    "name": f"{name} Temp",
+                    "model": model,
+                    "type": "temperature",
+                }
+                self.devices[SENSOR].append(temp_device)
                 
-            if type is not None:
-                device_info["type"] = type
-                
-            # Создаем удобное имя для устройства
-            if channel is not None:
-                if type is not None:
-                    device_info["name"] = f"{type.capitalize()} {subnet_id}.{device_id}.{channel}"
-                else:
-                    device_info["name"] = f"{device_type.capitalize()} {subnet_id}.{device_id}.{channel}"
-            else:
-                device_info["name"] = f"{device_type.capitalize()} {subnet_id}.{device_id}"
-                
-            self.devices[device_type].append(device_info)
-            _LOGGER.debug(f"Добавлено устройство {device_type}: {device_info['name']}") 
+                # Добавляем сенсор влажности
+                humid_device = {
+                    "subnet_id": subnet_id,
+                    "device_id": device_id,
+                    "channel": 4,
+                    "name": f"{name} Humidity",
+                    "model": model,
+                    "type": "humidity",
+                }
+                self.devices[SENSOR].append(humid_device)
+            
+            # Возвращаем None, так как мы уже добавили устройства напрямую
+            return None
+        
+        # Панели управления
+        elif device_type in [0x0010, 0x0011, 0x0012, 0x0013, 0x0014]:
+            # Определяем количество кнопок по типу устройства
+            buttons_map = {
+                0x0010: 8,  # MPL8.48 - 8 кнопок
+                0x0011: 4,  # MPL4.48 - 4 кнопки
+                0x0012: 4,  # MPT4.46 - 4 кнопки
+                0x0013: 4,  # MPE04.48 - 4 кнопки
+                0x0014: 2,  # MP2B.48 - 2 кнопки
+            }
+            
+            channels = buttons_map.get(device_type, 4)
+            
+            # Добавляем кнопки как бинарные сенсоры для отслеживания нажатий
+            for i in range(1, channels + 1):
+                button_device = {
+                    "subnet_id": subnet_id,
+                    "device_id": device_id,
+                    "channel": i,
+                    "name": f"{name} Button {i}",
+                    "model": model,
+                    "type": "button",
+                }
+                self.devices[BINARY_SENSOR].append(button_device)
+            
+            # Возвращаем None, так как мы уже добавили устройства напрямую
+            return None
+        
+        # Шлюзы и интерфейсы
+        elif device_type in [0x0192, 0x0195]:
+            # Не добавляем шлюзы и интерфейсы как устройства управления
+            return None
+        
+        # Неизвестные типы устройств
+        else:
+            _LOGGER.warning(f"Неизвестный тип устройства: 0x{device_type:04X}")
+            return {
+                "category": BINARY_SENSOR,  # По умолчанию как бинарный сенсор
+                "channels": 1,
+            }
 
 # Создаем альтернативное имя для BusproDiscovery для обратной совместимости
 DeviceDiscovery = BusproDiscovery 
