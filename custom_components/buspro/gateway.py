@@ -23,6 +23,9 @@ from .const import (
     OPERATION_UNIVERSAL_SWITCH,
 )
 
+from .pybuspro.transport import UDPClient
+from .pybuspro.helpers import TelegramHelper
+
 from .discovery import BusproDiscovery
 
 _LOGGER = logging.getLogger(__name__)

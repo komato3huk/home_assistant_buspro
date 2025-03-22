@@ -148,37 +148,43 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up HDL Buspro from a config entry."""
-    # Получаем конфигурационные параметры
-    host = entry.data.get(CONF_HOST, "255.255.255.255")
-    port = entry.data.get(CONF_PORT, 10000)
-    timeout = entry.data.get(CONF_TIMEOUT, DEFAULT_TIMEOUT)
+    _LOGGER.info(f"Настройка интеграции HDL Buspro из config entry: {entry.data}")
+    
+    # Получаем настройки из конфигурации
+    host = entry.data[CONF_HOST]
+    port = entry.data.get(CONF_PORT, DEFAULT_PORT)
+    gateway_port = entry.data.get(CONF_GATEWAY_PORT, DEFAULT_GATEWAY_PORT)
     device_subnet_id = entry.data.get(CONF_DEVICE_SUBNET_ID, DEFAULT_DEVICE_SUBNET_ID)
     device_id = entry.data.get(CONF_DEVICE_ID, DEFAULT_DEVICE_ID)
+    timeout = entry.data.get(CONF_TIMEOUT, DEFAULT_TIMEOUT)
     poll_interval = entry.data.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
-    gateway_host = entry.data.get(CONF_GATEWAY_HOST, host)
-    gateway_port = entry.data.get(CONF_GATEWAY_PORT, DEFAULT_GATEWAY_PORT)
     
-    # Создаем модуль обнаружения устройств
-    discovery = BusproDiscovery(
-        hass,
-        gateway_host=gateway_host,
-        gateway_port=gateway_port,
+    # Создаем шлюз HDL Buspro
+    gateway = BusproGateway(
+        hass=hass,
+        host=host,
+        port=gateway_port,
+        timeout=timeout,
+        poll_interval=poll_interval,
         device_subnet_id=device_subnet_id,
         device_id=device_id,
     )
     
-    # Создаем шлюз
-    gateway = BusproGateway(
-        hass,
-        discovery,
-        port=port,
-        poll_interval=poll_interval,
-        gateway_host=gateway_host,
-        gateway_port=gateway_port,
-    )
-    
     # Запускаем шлюз
     await gateway.start()
+    
+    # Создаем объект обнаружения устройств
+    discovery = BusproDiscovery(
+        hass=hass,
+        gateway_host=host,
+        gateway_port=gateway_port,
+        broadcast_address=host,
+        device_subnet_id=device_subnet_id,
+        device_id=device_id,
+    )
+    
+    # Устанавливаем ссылки между объектами
+    discovery.gateway = gateway
     
     # Запускаем обнаружение устройств
     await discovery.discover_devices()
@@ -193,9 +199,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
     
     # Регистрируем платформы
-    # Возвращаем платформу cover в список загружаемых компонентов
-    platforms = ["light", "switch", "cover", "climate", "sensor", "binary_sensor"]
-    await hass.config_entries.async_forward_entry_setups(entry, platforms)
+    await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
     
     # Регистрируем функцию для выгрузки entry
     entry.async_on_unload(entry.add_update_listener(_update_listener))

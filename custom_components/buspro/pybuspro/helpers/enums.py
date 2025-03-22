@@ -1,5 +1,5 @@
 """Enums for HDL Buspro protocol."""
-from enum import Enum, auto
+from enum import Enum, IntEnum
 
 
 class SuccessOrFailure(Enum):
@@ -7,21 +7,24 @@ class SuccessOrFailure(Enum):
     Failure = b'\xF5'
 
 
-class DeviceType(Enum):
-    """HDL Buspro device types."""
-    
+class DeviceType(IntEnum):
+    """Device types for HDL Buspro protocol."""
+    DIMMER = 0x0178
+    RELAY = 0x0188
+    RELAY_16 = 0x0189
+    COVER = 0x0180
+    CLIMATE = 0x0073
+    AIR_CONDITIONER = 0x0270
+    SENSOR = 0x018C
+    DLP = 0x0028
+    GRANITE = 0x0100
     LIGHT = 0x0001
     SWITCH = 0x0002
-    COVER = 0x0003
-    CLIMATE = 0x0004
-    SENSOR = 0x0005
-    NotSet = b'\x00\x00'
     SB_DN_6B0_10v = b'\x00\x11'   # Rele varme
     SB_DN_SEC250K = b'\x0B\xE9'   # Sikkerhetsmodul
     SB_CMS_12in1 = b'\x01\x34'    # 12i1
     SB_DN_Logic960 = b'\x04\x53'  # Logikkmodul
     SB_DLP2 = b'\x00\x86'         # DLP
-    SB_DLP = b'\x00\x95'          # DLP
     SB_DLP_v2 = b'\x00\x9C'       # DLPv2
     PyBusPro = b'\xFF\xFC'
     SmartHDLTest = b'\xFF\xFD'
@@ -48,9 +51,8 @@ class SwitchStatusOnOff(Enum):
     ON = 1
 
 
-class OnOffStatus(Enum):
-    """On/Off status enum."""
-    
+class OnOffStatus(IntEnum):
+    """On/off status for devices."""
     OFF = 0
     ON = 1
 
@@ -69,14 +71,24 @@ class TemperatureMode(Enum):
 
 
 class OperateCode:
-    """HDL Buspro operation codes."""
-    
-    SINGLE_CHANNEL = 0x0031
-    READ_STATUS = 0x0032
+    """Operation codes for HDL Buspro protocol."""
+    DEVICE_DISCOVERY = 0x000E
+    READ_STATUS = 0x0031
+    WRITE_STATUS = 0x0032
     SCENE_CONTROL = 0x0002
     UNIVERSAL_SWITCH = 0x0003
-    TIME_IF_FROM_LOGIC_OR_SECURITY = 0x000E
-    DISCOVERY = 0x000D
+    SINGLE_CHANNEL = 0x0031
+    
+    # HVAC operation codes
+    READ_TEMPERATURE = 0x1948
+    WRITE_TEMPERATURE = 0x1949
+    READ_MODE = 0x194A
+    WRITE_MODE = 0x194B
+    READ_FAN_SPEED = 0x194C
+    WRITE_FAN_SPEED = 0x194D
+    
+    # Response codes
+    DISCOVERY_RESPONSE = 0x0FA3
 
     NotSet = b'\x00'
 

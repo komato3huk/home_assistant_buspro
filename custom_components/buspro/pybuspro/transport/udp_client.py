@@ -1,91 +1,110 @@
 """UDP client for HDL Buspro protocol."""
-import logging
 import asyncio
-import socket
-from typing import Callable, Tuple, Any
+import logging
+from typing import Callable, Optional, Tuple
 
 _LOGGER = logging.getLogger(__name__)
 
 class UDPClient:
-    """UDP client for HDL Buspro communication."""
-    
-    def __init__(self, parent, gateway_host: str, callback=None):
-        """Initialize the UDP client."""
-        self.parent = parent
-        self.gateway_host = gateway_host
-        self.callback = callback
+    """UDP client for sending and receiving messages from HDL Buspro devices."""
+
+    def __init__(
+        self,
+        loop: asyncio.AbstractEventLoop,
+        data_callback: Callable,
+        target_host: str = None,
+        target_port: int = 6000,
+    ):
+        """Initialize UDP client.
+
+        Args:
+            loop: asyncio event loop
+            data_callback: callback function for received data
+            target_host: target host for sending messages
+            target_port: target port for sending messages
+        """
+        self.loop = loop
+        self.data_callback = data_callback
+        self.target_host = target_host
+        self.target_port = target_port
         self.transport = None
         self.protocol = None
+
+    async def start(self):
+        """Start UDP client."""
+        _LOGGER.info(f"Запуск UDP клиента для HDL Buspro")
         
-    async def start(self) -> bool:
-        """Start the UDP client."""
-        try:
-            # Create a UDP socket
-            self.transport, self.protocol = await asyncio.get_event_loop().create_datagram_endpoint(
-                lambda: _UDPClientProtocol(self.callback),
-                local_addr=('0.0.0.0', 0)
-            )
-            return True
-        except Exception as err:
-            _LOGGER.error("Failed to start UDP client: %s", err)
-            return False
-    
-    async def stop(self) -> None:
-        """Stop the UDP client."""
+        # Создаем протокол и транспорт
+        self.transport, self.protocol = await self.loop.create_datagram_endpoint(
+            lambda: self._UDPClientProtocol(self.data_callback),
+            local_addr=("0.0.0.0", 0),
+            allow_broadcast=True,
+        )
+        
+        _LOGGER.info(f"UDP клиент запущен")
+
+    async def stop(self):
+        """Stop UDP client."""
+        _LOGGER.info(f"Остановка UDP клиента")
+        
         if self.transport:
             self.transport.close()
             self.transport = None
-    
-    async def send_message(self, message):
-        """Send a UDP message through the HDL Buspro gateway."""
+            self.protocol = None
+            
+        _LOGGER.info(f"UDP клиент остановлен")
+
+    async def send(self, data, host=None, port=None):
+        """Send data to target host."""
         if not self.transport:
-            await self.start()
+            _LOGGER.error(f"UDP клиент не запущен")
+            return False
             
         try:
-            # Если это уже байты, отправляем как есть
-            if isinstance(message, bytes):
-                data = message
-            # Если это словарь или другой объект, нужно сериализовать
-            else:
-                # В реальной реализации здесь должна быть сериализация объекта в байты
-                # Для простоты просто преобразуем в строку, а затем в байты
-                data = str(message).encode('utf-8')
-                
-            # Порт по умолчанию 6000, но можно переопределить через параметр port
-            port = getattr(self.parent, "hdl_gateway_port", 6000)
+            target_host = host or self.target_host or "255.255.255.255"
+            target_port = port or self.target_port or 6000
             
-            # Логируем отправку на шлюз
-            _LOGGER.debug("Sending UDP message to gateway %s:%s", self.gateway_host, port)
-            
-            # Отправляем сообщение на шлюз
-            self.transport.sendto(data, (self.gateway_host, port))
+            self.transport.sendto(data, (target_host, target_port))
+            _LOGGER.debug(f"Отправлены данные на {target_host}:{target_port}: {data.hex()}")
             return True
-        except Exception as err:
-            _LOGGER.error("Failed to send UDP message to gateway: %s", err)
+            
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при отправке данных: {e}")
             return False
 
+    class _UDPClientProtocol(asyncio.DatagramProtocol):
+        """UDP protocol for handling received data."""
 
-class _UDPClientProtocol(asyncio.DatagramProtocol):
-    """UDP protocol for HDL Buspro communication."""
-    
-    def __init__(self, callback: Callable = None):
-        """Initialize the UDP protocol."""
-        self.callback = callback
-        
-    def connection_made(self, transport: asyncio.transports.DatagramTransport) -> None:
-        """Called when connection is established."""
-        pass
-        
-    def datagram_received(self, data: bytes, addr: Tuple[str, int]) -> None:
-        """Called when data is received."""
-        if self.callback:
-            self.callback(data, addr)
-            
-    def error_received(self, exc) -> None:
-        """Called when error is received."""
-        _LOGGER.error("UDP protocol error: %s", exc)
-        
-    def connection_lost(self, exc) -> None:
-        """Called when connection is lost."""
-        if exc:
-            _LOGGER.warning("UDP connection lost: %s", exc)
+        def __init__(self, data_callback):
+            """Initialize protocol."""
+            self.data_callback = data_callback
+            self.transport = None
+            super().__init__()
+
+        def connection_made(self, transport):
+            """Called when connection is made."""
+            self.transport = transport
+
+        def datagram_received(self, data, addr):
+            """Called when data is received."""
+            if self.data_callback:
+                asyncio.create_task(self._process_data(data, addr))
+
+        async def _process_data(self, data, addr):
+            """Process received data."""
+            try:
+                await self.data_callback(data, addr)
+            except Exception as e:
+                _LOGGER.error(f"Ошибка при обработке полученных данных: {e}")
+
+        def error_received(self, exc):
+            """Called when an error is received."""
+            _LOGGER.error(f"Ошибка UDP: {exc}")
+
+        def connection_lost(self, exc):
+            """Called when connection is lost."""
+            if exc:
+                _LOGGER.error(f"Соединение UDP закрыто с ошибкой: {exc}")
+            else:
+                _LOGGER.debug(f"Соединение UDP закрыто")
+            self.transport = None
