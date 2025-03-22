@@ -531,7 +531,7 @@ class BusproGateway:
         """Handle received data from UDP socket."""
         try:
             # Преобразуем полученные данные в телеграмму
-            telegram = self.telegram_helper.build_telegram_from_udp_data(data)
+            telegram = self.telegram_helper.build_telegram_from_udp_data(data, address=addr)
             if not telegram:
                 _LOGGER.debug(f"Не удалось разобрать данные от {addr}: {data.hex()}")
                 return
@@ -540,14 +540,13 @@ class BusproGateway:
             source_device_id = telegram.get("source_device_id")
             operate_code = telegram.get("operate_code", 0)
             
-            _LOGGER.debug(f"Получено сообщение с opcode=0x{operate_code:X} от {source_subnet_id}.{source_device_id}: {data.hex()}")
+            _LOGGER.debug(f"Получено сообщение с opcode=0x{operate_code:04X} от {source_subnet_id}.{source_device_id}: {data.hex()}")
             
             # Проверяем, является ли это ответом на запрос обнаружения
             if operate_code == 0xFA3 and len(telegram.get("data", [])) >= 2:
                 # Получаем тип устройства из данных (первые два байта)
                 device_type = (telegram["data"][0] << 8) | telegram["data"][1]
-                _LOGGER.info(f"Обнаружено устройство HDL: подсеть {source_subnet_id}, ID {source_device_id}, тип 0x{device_type:04X}")
-                _LOGGER.debug(f"Данные обнаружения: {telegram['data']}")
+                _LOGGER.info(f"ОБНАРУЖЕНО УСТРОЙСТВО HDL: подсеть {source_subnet_id}, ID {source_device_id}, тип 0x{device_type:04X}")
                 
                 # Вывести дополнительную информацию о типе устройства
                 device_info = {
@@ -560,9 +559,16 @@ class BusproGateway:
                 }
                 _LOGGER.info(f"Детали устройства HDL: {device_info}")
                 
+                # Отладочная информация - полностью вывести содержимое пакета
+                _LOGGER.debug(f"Полный пакет обнаружения: {data.hex()}")
+                _LOGGER.debug(f"Данные телеграммы: {telegram}")
+                
                 # Добавляем устройство в список для discovery
                 if self.discovery_callback:
                     await self.discovery_callback(device_info)
+                    _LOGGER.debug(f"Вызван callback обнаружения для устройства {source_subnet_id}.{source_device_id}")
+                else:
+                    _LOGGER.warning(f"Callback обнаружения не зарегистрирован, устройство {source_subnet_id}.{source_device_id} не будет добавлено")
             
             # Обрабатываем ответы на запросы
             if self._callbacks:
@@ -697,3 +703,24 @@ class BusproGateway:
         # Устанавливаем результат как таймаут, если future еще не выполнен
         if not future.done():
             future.set_result({"status": "timeout"}) 
+
+    async def send_discovery_packet(self, subnet_id, device_id=0xFF):
+        """Отправить пакет обнаружения устройств HDL Buspro."""
+        try:
+            # Код операции для запроса обнаружения устройств
+            operate_code = [0x00, 0x0E]  # 0x000E - "Device Discovery" в HDL Buspro
+            
+            # Отправляем запрос с широковещательным адресом
+            _LOGGER.info(f"Отправка запроса обнаружения для подсети {subnet_id}.{device_id} через шлюз {self.gateway_host}:{self.gateway_port}")
+            
+            result = await self.send_message(
+                [subnet_id, device_id, 0, 0],  # target_address - broadcast для подсети
+                operate_code,                  # операция обнаружения
+                [],                            # пустые данные
+                timeout=3.0                    # увеличенный таймаут
+            )
+            
+            return result is not None
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при отправке запроса обнаружения: {e}")
+            return False 

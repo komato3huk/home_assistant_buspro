@@ -15,7 +15,7 @@ _LOGGER = logging.getLogger(__name__)
 class TelegramHelper:
     """Helper class for working with HDL Buspro telegrams."""
     
-    def build_telegram_from_udp_data(self, data: bytes, address: Tuple[str, int]) -> Dict[str, Any]:
+    def build_telegram_from_udp_data(self, data: bytes, address: Tuple[str, int] = None) -> Dict[str, Any]:
         """Build telegram dictionary from UDP data."""
         if not data or len(data) < 15:
             _LOGGER.error(f"Неверный формат данных UDP: {data}, длина: {len(data) if data else 0}")
@@ -27,7 +27,7 @@ class TelegramHelper:
                 _LOGGER.warning(f"Неверный заголовок пакета: {header}, полный пакет: {binascii.hexlify(data).decode()}")
                 return None
             
-            _LOGGER.debug(f"Обработка UDP пакета: {binascii.hexlify(data).decode()}")
+            _LOGGER.debug(f"Обработка UDP пакета от {address if address else 'неизвестного источника'}: {binascii.hexlify(data).decode()}")
         except Exception as e:
             _LOGGER.error(f"Ошибка при чтении заголовка пакета: {e}, данные: {binascii.hexlify(data).decode()}")
             return None
