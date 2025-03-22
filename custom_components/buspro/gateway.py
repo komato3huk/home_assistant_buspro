@@ -2,6 +2,7 @@
 import asyncio
 import logging
 import time
+from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
 from homeassistant.core import HomeAssistant
@@ -45,7 +46,7 @@ class BusproGateway:
                 self._polling_task = async_track_time_interval(
                     self.hass,
                     self._poll_devices,
-                    dt_util.timedelta(seconds=self.poll_interval),
+                    timedelta(seconds=self.poll_interval),
                 )
                 
             _LOGGER.info("HDL Buspro gateway started")

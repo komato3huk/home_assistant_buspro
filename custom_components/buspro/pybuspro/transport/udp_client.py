@@ -37,7 +37,7 @@ class UDPClient:
             self.transport = None
     
     async def send_message(self, message):
-        """Send a UDP message."""
+        """Send a UDP message through the HDL Buspro gateway."""
         if not self.transport:
             await self.start()
             
@@ -53,10 +53,15 @@ class UDPClient:
                 
             # Порт по умолчанию 6000, но можно переопределить через параметр port
             port = getattr(self.parent, "hdl_gateway_port", 6000)
+            
+            # Логируем отправку на шлюз
+            _LOGGER.debug("Sending UDP message to gateway %s:%s", self.gateway_host, port)
+            
+            # Отправляем сообщение на шлюз
             self.transport.sendto(data, (self.gateway_host, port))
             return True
         except Exception as err:
-            _LOGGER.error("Failed to send UDP message: %s", err)
+            _LOGGER.error("Failed to send UDP message to gateway: %s", err)
             return False
 
 

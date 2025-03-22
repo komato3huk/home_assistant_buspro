@@ -103,7 +103,7 @@ class NetworkInterface:
         return self._running and self._connected and self._udp_client is not None
 
     async def send_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
-        """Send a message to the HDL Buspro bus and return the response."""
+        """Send a message to the HDL Buspro bus through the gateway and return the response."""
         if not self.connected:
             await self.start()
             
@@ -122,7 +122,15 @@ class NetworkInterface:
                 "data": message.get("data", [])
             }
             
-            # Send the telegram
+            # Логируем отправку через шлюз
+            _LOGGER.debug(
+                "Sending message through gateway %s:%s to device %d.%d: operation=%04X, data=%s",
+                self.hdl_gateway_host, self.hdl_gateway_port,
+                telegram["target_subnet_id"], telegram["target_device_id"],
+                telegram["operation_code"], telegram["data"]
+            )
+            
+            # Send the telegram through the gateway
             await self._send_message(telegram)
             
             # For now, return a simulated response
@@ -141,7 +149,7 @@ class NetworkInterface:
                 }
                 
         except Exception as err:
-            _LOGGER.error("Error sending message: %s", err)
+            _LOGGER.error("Error sending message through gateway: %s", err)
             return {"status": "error", "message": str(err)}
     
     def _simulate_discovery_response(self) -> Dict[str, Any]:
@@ -170,16 +178,33 @@ class NetworkInterface:
 
     async def _send_message(self, message):
         """Send message through UDP client."""
-        if self._udp_client:
-            await self._udp_client.send_message(message)
-        else:
+        if not self._udp_client:
             _LOGGER.error("Cannot send message: UDP client not initialized")
+            return False
+            
+        try:
+            result = await self._udp_client.send_message(message)
+            if not result:
+                _LOGGER.warning("Message was not sent successfully through gateway")
+            return result
+        except Exception as err:
+            _LOGGER.error("Error sending message through UDP client: %s", err)
             return False
 
     async def send_telegram(self, telegram):
-        message = self._th.build_send_buffer(telegram)
-
-        gateway_address_send, _ = self.hdl_gateway_host, self.hdl_gateway_port
-        self.parent.logger.debug(self._th.build_telegram_from_udp_data(message, gateway_address_send))
-
-        await self._udp_client.send_message(message)
+        """Send telegram through HDL Buspro gateway."""
+        try:
+            message = self._th.build_send_buffer(telegram)
+            
+            # Логируем отправку через шлюз
+            _LOGGER.debug(
+                "Sending telegram through gateway %s:%s to device %d.%d",
+                self.hdl_gateway_host, self.hdl_gateway_port,
+                telegram.get("target_subnet_id", 0), telegram.get("target_device_id", 0)
+            )
+            
+            result = await self._udp_client.send_message(message)
+            return result
+        except Exception as err:
+            _LOGGER.error("Error sending telegram through gateway: %s", err)
+            return False
