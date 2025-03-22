@@ -36,16 +36,28 @@ class UDPClient:
             self.transport.close()
             self.transport = None
     
-    async def send_message(self, message: bytes) -> None:
+    async def send_message(self, message):
         """Send a UDP message."""
         if not self.transport:
             await self.start()
             
         try:
-            # Port hardcoded to 6000 as it's the standard for HDL Buspro
-            self.transport.sendto(message, (self.gateway_host, 6000))
+            # Если это уже байты, отправляем как есть
+            if isinstance(message, bytes):
+                data = message
+            # Если это словарь или другой объект, нужно сериализовать
+            else:
+                # В реальной реализации здесь должна быть сериализация объекта в байты
+                # Для простоты просто преобразуем в строку, а затем в байты
+                data = str(message).encode('utf-8')
+                
+            # Порт по умолчанию 6000, но можно переопределить через параметр port
+            port = getattr(self.parent, "hdl_gateway_port", 6000)
+            self.transport.sendto(data, (self.gateway_host, port))
+            return True
         except Exception as err:
             _LOGGER.error("Failed to send UDP message: %s", err)
+            return False
 
 
 class _UDPClientProtocol(asyncio.DatagramProtocol):

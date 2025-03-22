@@ -44,9 +44,16 @@ class HDLDevice:
             self.network_interface.register_callback(self._handle_message)
             await self.network_interface.start()
             self.started = True
-            self.connected = True
-            _LOGGER.info("Connected to HDL Buspro gateway at %s:%s with device address %d.%d, using gateway: %s:%s", 
-                        self.host, self.port, self.subnet_id, self.device_id, self.gateway_host, self.gateway_port)
+            
+            # Проверяем, успешно ли запустился интерфейс
+            if self.network_interface.connected:
+                self.connected = True
+                _LOGGER.info("Connected to HDL Buspro gateway at %s:%s with device address %d.%d, using gateway: %s:%s", 
+                            self.host, self.port, self.subnet_id, self.device_id, self.gateway_host, self.gateway_port)
+            else:
+                self.connected = False
+                _LOGGER.warning("Network interface started but not connected")
+                
         except Exception as err:
             self.connected = False
             _LOGGER.error("Failed to connect to HDL Buspro gateway: %s", err)

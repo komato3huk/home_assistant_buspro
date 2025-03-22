@@ -34,13 +34,15 @@ class NetworkInterface:
         self.callbacks = []
         self.transport = None
         self.protocol = None
-        self.connected = False
-        self.udp_client = None
+        self._connected = False
+        self._running = False
+        self._udp_client = None
+        self._read_task = None
         self._th = TelegramHelper()
         self._init_udp_client()
         
     def _init_udp_client(self):
-        self.udp_client = UDPClient(self.parent, self.hdl_gateway_host, self._udp_request_received)
+        self._udp_client = UDPClient(self.parent, self.hdl_gateway_host, self._udp_request_received)
 
     def _udp_request_received(self, data, address):
         if self.callbacks:
@@ -51,14 +53,11 @@ class NetworkInterface:
     async def start(self):
         """Start the network interface."""
         try:
-            # Initialize UDP client
-            self._udp_client = UDPClient(
-                self,
-                self.hdl_gateway_host
-            )
+            # Initialize UDP client уже не нужно, так как мы сделали это в _init_udp_client
             await self._udp_client.start()
             
             self._running = True
+            self._connected = True
             self._read_task = asyncio.create_task(self._read_loop())
             
             _LOGGER.info("Network interface started, connected to %s:%s", 
@@ -67,14 +66,15 @@ class NetworkInterface:
         except Exception as err:
             _LOGGER.error("Failed to start network interface: %s", err)
             self._running = False
+            self._connected = False
             return False
     
     async def stop(self):
         """Stop the network interface."""
-        if self.read_task:
-            self.read_task.cancel()
+        if self._read_task:
+            self._read_task.cancel()
             try:
-                await self.read_task
+                await self._read_task
             except asyncio.CancelledError:
                 pass
             
@@ -82,59 +82,25 @@ class NetworkInterface:
             self.writer.close()
             await self.writer.wait_closed()
             
-        self.connected = False
+        self._connected = False
+        self._running = False
         
     async def _read_loop(self):
-        """Read data from the HDL Buspro bus continuously."""
-        while self.connected:
+        """Read data from UDP client continuously."""
+        while self._connected and self._running:
             try:
-                # Read header (first 7 bytes)
-                header = await self.reader.read(7)
-                if not header or len(header) < 7:
-                    # Connection closed or header incomplete
-                    await asyncio.sleep(0.1)
-                    continue
-                    
-                # Check if this is a valid HDL packet
-                if header[0] != 0xAA or header[1] != 0xAA:
-                    # Invalid header, discard and continue
-                    continue
-                    
-                # Parse header
-                subnet_id = header[2]
-                device_id = header[3]
-                operate_code = (header[4] << 8) | header[5]
-                data_length = header[6]
-                
-                # Read data
-                data = await self.reader.read(data_length)
-                
-                # Read CRC
-                crc = await self.reader.read(1)
-                
-                # Process message
-                message = {
-                    "subnet_id": subnet_id,
-                    "device_id": device_id,
-                    "operate_code": operate_code,
-                    "data": list(data)
-                }
-                
-                # Call all registered callbacks
-                for callback in self.callbacks:
-                    callback(message)
-                    
-            except (OSError, asyncio.TimeoutError) as err:
-                _LOGGER.error("Error reading from HDL Buspro: %s", err)
-                await asyncio.sleep(1)
+                # В этой реализации нет непрерывного чтения,
+                # так как UDP-клиент вызывает обратный вызов при получении данных
+                # Просто ждем некоторое время, чтобы не загружать CPU
+                await asyncio.sleep(0.1)
             except Exception as err:
-                _LOGGER.error("Unexpected error in HDL read loop: %s", err)
+                _LOGGER.error("Error in read loop: %s", err)
                 await asyncio.sleep(1)
-    
+                
     @property
     def connected(self):
         """Return if the network interface is connected."""
-        return self._running and self._udp_client is not None
+        return self._running and self._connected and self._udp_client is not None
 
     async def send_message(self, message: Dict[str, Any]) -> Dict[str, Any]:
         """Send a message to the HDL Buspro bus and return the response."""
@@ -192,13 +158,23 @@ class NetworkInterface:
             ]
         }
     
-    def register_callback(self, callback: Callable[[Dict[str, Any]], None]):
-        """Register a callback for incoming messages."""
+    def register_callback(self, callback):
+        """Register a callback for received messages."""
         if callback not in self.callbacks:
             self.callbacks.append(callback)
+        
+    def unregister_callback(self, callback):
+        """Unregister a callback."""
+        if callback in self.callbacks:
+            self.callbacks.remove(callback)
 
     async def _send_message(self, message):
-        await self.udp_client.send_message(message)
+        """Send message through UDP client."""
+        if self._udp_client:
+            await self._udp_client.send_message(message)
+        else:
+            _LOGGER.error("Cannot send message: UDP client not initialized")
+            return False
 
     async def send_telegram(self, telegram):
         message = self._th.build_send_buffer(telegram)
@@ -206,4 +182,4 @@ class NetworkInterface:
         gateway_address_send, _ = self.hdl_gateway_host, self.hdl_gateway_port
         self.parent.logger.debug(self._th.build_telegram_from_udp_data(message, gateway_address_send))
 
-        await self.udp_client.send_message(message)
+        await self._udp_client.send_message(message)
