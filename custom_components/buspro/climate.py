@@ -96,6 +96,13 @@ async def async_setup_entry(
         device_type = device.get("device_type", 0)
         _LOGGER.debug(f"Тип устройства климат-контроля: 0x{device_type:04X}")
         
+        # Специальная обработка для модуля кондиционера MAC01.431 (0x0270)
+        if device_type == 0x0270:
+            _LOGGER.info(f"Модуль управления кондиционером MAC01.431: {subnet_id}.{device_id}")
+            entity = BusproAirConditioner(gateway, subnet_id, device_id, device_name)
+            entities.append(entity)
+            continue
+        
         # Создаем сущность климат-контроля
         entity = BusproClimate(gateway, subnet_id, device_id, device_name)
         entities.append(entity)
@@ -475,3 +482,337 @@ class BusproClimate(ClimateEntity):
             # Это позволит избежать мигания устройства в интерфейсе
             if self._current_temperature is None:
                 self._available = False
+
+
+class BusproAirConditioner(ClimateEntity):
+    """Представление модуля управления кондиционером HDL Buspro MAC01.431."""
+
+    def __init__(
+        self,
+        gateway,
+        subnet_id: int,
+        device_id: int,
+        name: str,
+    ):
+        """Инициализация модуля управления кондиционером."""
+        self._gateway = gateway
+        self._subnet_id = subnet_id
+        self._device_id = device_id
+        self._attr_name = f"{name} (AC)"
+        self._attr_unique_id = f"ac_{subnet_id}_{device_id}"
+        
+        # Состояние устройства
+        self._hvac_mode = HVACMode.OFF
+        self._hvac_action = HVACAction.IDLE
+        self._target_temperature = 24.0
+        self._current_temperature = None
+        self._fan_mode = None
+        
+        # Поддерживаемые режимы HVAC
+        self._attr_hvac_modes = [
+            HVACMode.OFF, 
+            HVACMode.HEAT, 
+            HVACMode.COOL, 
+            HVACMode.AUTO,
+            HVACMode.FAN_ONLY,
+            HVACMode.DRY
+        ]
+        
+        # Поддерживаемые режимы вентилятора
+        self._attr_fan_modes = [
+            "auto", "low", "medium", "high"
+        ]
+        
+        # Настройка поддерживаемых функций
+        self._attr_supported_features = (
+            ClimateEntityFeature.TARGET_TEMPERATURE |
+            ClimateEntityFeature.FAN_MODE
+        )
+        
+        # Настройки температуры
+        self._attr_temperature_unit = UnitOfTemperature.CELSIUS
+        self._attr_min_temp = 16
+        self._attr_max_temp = 30
+        self._attr_target_temperature_step = 1.0
+        
+        # Доступность устройства
+        self._available = True
+        
+        _LOGGER.info(f"Инициализирован модуль управления кондиционером: {name} ({subnet_id}.{device_id})")
+        
+    @property
+    def name(self) -> str:
+        """Return the name of the climate device."""
+        return self._attr_name
+        
+    @property
+    def unique_id(self) -> str:
+        """Return the unique ID of the climate device."""
+        return self._attr_unique_id
+        
+    @property
+    def available(self) -> bool:
+        """Return True if entity is available."""
+        return self._available
+        
+    @property
+    def hvac_mode(self) -> HVACMode:
+        """Return hvac operation mode."""
+        return self._hvac_mode
+        
+    @property
+    def hvac_action(self) -> HVACAction:
+        """Return the current running hvac operation."""
+        return self._hvac_action
+        
+    @property
+    def fan_mode(self) -> Optional[str]:
+        """Return the fan setting."""
+        return self._fan_mode
+        
+    @property
+    def current_temperature(self) -> Optional[float]:
+        """Return the current temperature."""
+        return self._current_temperature
+        
+    @property
+    def target_temperature(self) -> Optional[float]:
+        """Return the temperature we try to reach."""
+        return self._target_temperature
+
+    async def async_set_temperature(self, **kwargs) -> None:
+        """Set new target temperature."""
+        temperature = kwargs.get(ATTR_TEMPERATURE)
+        if temperature is None:
+            return
+
+        # Проверяем ограничения температуры
+        if temperature < self._attr_min_temp:
+            temperature = self._attr_min_temp
+        elif temperature > self._attr_max_temp:
+            temperature = self._attr_max_temp
+
+        self._target_temperature = temperature
+        
+        # Отправляем команду на устройство
+        # Для MAC01.431 используем специальную команду управления кондиционером
+        try:
+            # Код операции для управления кондиционером
+            operation_code = 0x1947  # Примерный код, нужно проверить документацию
+            
+            # Данные команды включают температуру и текущий режим
+            # [целевая_температура, режим]
+            data = [int(self._target_temperature), self._get_hvac_mode_code()]
+            
+            _LOGGER.debug(f"Отправка команды установки температуры для MAC01.431: {data}")
+            
+            response = await self._gateway.send_message(
+                [self._subnet_id, self._device_id, 0, 0],  # target_address
+                [operation_code >> 8, operation_code & 0xFF],  # operation_code
+                data,  # data
+            )
+            
+            self.async_write_ha_state()
+            
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при установке температуры для MAC01.431: {e}")
+    
+    async def async_set_hvac_mode(self, hvac_mode: HVACMode) -> None:
+        """Set HVAC mode."""
+        if hvac_mode not in self._attr_hvac_modes:
+            _LOGGER.warning(f"Неподдерживаемый режим HVAC: {hvac_mode}")
+            return
+            
+        self._hvac_mode = hvac_mode
+        
+        # Обновляем текущее действие
+        if hvac_mode == HVACMode.OFF:
+            self._hvac_action = HVACAction.OFF
+        elif hvac_mode == HVACMode.HEAT:
+            self._hvac_action = HVACAction.HEATING
+        elif hvac_mode == HVACMode.COOL:
+            self._hvac_action = HVACAction.COOLING
+        elif hvac_mode == HVACMode.FAN_ONLY:
+            self._hvac_action = HVACAction.FAN
+        elif hvac_mode == HVACMode.DRY:
+            self._hvac_action = HVACAction.DRYING
+        elif hvac_mode == HVACMode.AUTO:
+            # В автоматическом режиме действие зависит от текущей и целевой температуры
+            if self._current_temperature and self._target_temperature:
+                if self._current_temperature < self._target_temperature:
+                    self._hvac_action = HVACAction.HEATING
+                elif self._current_temperature > self._target_temperature:
+                    self._hvac_action = HVACAction.COOLING
+                else:
+                    self._hvac_action = HVACAction.IDLE
+            else:
+                self._hvac_action = HVACAction.IDLE
+        
+        # Отправляем команду на устройство
+        try:
+            # Код операции для управления режимом
+            operation_code = 0x1946  # Примерный код, нужно проверить документацию
+            
+            # Данные команды: [режим, вкл/выкл]
+            mode_code = self._get_hvac_mode_code()
+            power = 1 if hvac_mode != HVACMode.OFF else 0
+            data = [mode_code, power]
+            
+            _LOGGER.debug(f"Отправка команды установки режима для MAC01.431: {data}")
+            
+            response = await self._gateway.send_message(
+                [self._subnet_id, self._device_id, 0, 0],  # target_address
+                [operation_code >> 8, operation_code & 0xFF],  # operation_code
+                data,  # data
+            )
+            
+            self.async_write_ha_state()
+            
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при установке режима HVAC для MAC01.431: {e}")
+    
+    async def async_set_fan_mode(self, fan_mode: str) -> None:
+        """Set fan mode."""
+        if fan_mode not in self._attr_fan_modes:
+            _LOGGER.warning(f"Неподдерживаемый режим вентилятора: {fan_mode}")
+            return
+            
+        self._fan_mode = fan_mode
+        
+        # Отправляем команду на устройство
+        try:
+            # Код операции для управления вентилятором
+            operation_code = 0x1948  # Примерный код, нужно проверить документацию
+            
+            # Данные команды: [режим_вентилятора]
+            fan_mode_code = self._get_fan_mode_code(fan_mode)
+            data = [fan_mode_code]
+            
+            _LOGGER.debug(f"Отправка команды установки режима вентилятора для MAC01.431: {data}")
+            
+            response = await self._gateway.send_message(
+                [self._subnet_id, self._device_id, 0, 0],  # target_address
+                [operation_code >> 8, operation_code & 0xFF],  # operation_code
+                data,  # data
+            )
+            
+            self.async_write_ha_state()
+            
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при установке режима вентилятора для MAC01.431: {e}")
+    
+    async def async_update(self) -> None:
+        """Retrieve latest state from the device."""
+        try:
+            # Код операции для запроса статуса кондиционера
+            operation_code = 0x1945  # Примерный код, нужно проверить документацию
+            
+            _LOGGER.debug(f"Запрос статуса кондиционера MAC01.431: {self._subnet_id}.{self._device_id}")
+            
+            response = await self._gateway.send_message(
+                [self._subnet_id, self._device_id, 0, 0],  # target_address
+                [operation_code >> 8, operation_code & 0xFF],  # operation_code
+                [],  # data
+            )
+            
+            # Обрабатываем ответ, если получили данные
+            if response and isinstance(response, dict) and "data" in response:
+                # Пример: data = [power, mode, fan_speed, current_temp, target_temp]
+                data = response["data"]
+                
+                if len(data) >= 5:
+                    power = data[0]
+                    mode_code = data[1]
+                    fan_speed_code = data[2]
+                    current_temp = data[3]
+                    target_temp = data[4]
+                    
+                    # Обновляем состояние
+                    if power == 0:
+                        self._hvac_mode = HVACMode.OFF
+                        self._hvac_action = HVACAction.OFF
+                    else:
+                        # Устанавливаем режим на основе кода
+                        self._hvac_mode = self._get_hvac_mode_from_code(mode_code)
+                        
+                        # Устанавливаем действие на основе режима
+                        if self._hvac_mode == HVACMode.HEAT:
+                            self._hvac_action = HVACAction.HEATING
+                        elif self._hvac_mode == HVACMode.COOL:
+                            self._hvac_action = HVACAction.COOLING
+                        elif self._hvac_mode == HVACMode.FAN_ONLY:
+                            self._hvac_action = HVACAction.FAN
+                        elif self._hvac_mode == HVACMode.DRY:
+                            self._hvac_action = HVACAction.DRYING
+                        else:
+                            self._hvac_action = HVACAction.IDLE
+                    
+                    # Обновляем режим вентилятора
+                    self._fan_mode = self._get_fan_mode_from_code(fan_speed_code)
+                    
+                    # Обновляем температуры
+                    self._current_temperature = float(current_temp)
+                    self._target_temperature = float(target_temp)
+                    
+                    self._available = True
+                else:
+                    _LOGGER.warning(f"Недостаточно данных в ответе от MAC01.431: {data}")
+            else:
+                _LOGGER.warning(f"Не удалось получить данные от MAC01.431: {response}")
+                self._available = False
+            
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при обновлении состояния MAC01.431: {e}")
+            self._available = False
+        
+        self.async_write_ha_state()
+    
+    def _get_hvac_mode_code(self) -> int:
+        """Получить код режима HVAC для отправки на устройство."""
+        if self._hvac_mode == HVACMode.HEAT:
+            return 1
+        elif self._hvac_mode == HVACMode.COOL:
+            return 2
+        elif self._hvac_mode == HVACMode.AUTO:
+            return 3
+        elif self._hvac_mode == HVACMode.DRY:
+            return 4
+        elif self._hvac_mode == HVACMode.FAN_ONLY:
+            return 5
+        return 0  # Выключено
+    
+    def _get_hvac_mode_from_code(self, code: int) -> HVACMode:
+        """Получить режим HVAC из кода устройства."""
+        if code == 1:
+            return HVACMode.HEAT
+        elif code == 2:
+            return HVACMode.COOL
+        elif code == 3:
+            return HVACMode.AUTO
+        elif code == 4:
+            return HVACMode.DRY
+        elif code == 5:
+            return HVACMode.FAN_ONLY
+        return HVACMode.OFF
+    
+    def _get_fan_mode_code(self, fan_mode: str) -> int:
+        """Получить код режима вентилятора для отправки на устройство."""
+        if fan_mode == "auto":
+            return 0
+        elif fan_mode == "low":
+            return 1
+        elif fan_mode == "medium":
+            return 2
+        elif fan_mode == "high":
+            return 3
+        return 0  # Auto by default
+    
+    def _get_fan_mode_from_code(self, code: int) -> str:
+        """Получить режим вентилятора из кода устройства."""
+        if code == 1:
+            return "low"
+        elif code == 2:
+            return "medium"
+        elif code == 3:
+            return "high"
+        return "auto"
