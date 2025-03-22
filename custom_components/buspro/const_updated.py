@@ -179,4 +179,4 @@ ATTR_POSITION = "position"
 ATTR_TEMPERATURE = "temperature"
 
 # Preset modes
-CONF_PRESET_MODES = "preset_modes"
+CONF_PRESET_MODES = "preset_modes" 
