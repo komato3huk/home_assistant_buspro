@@ -131,7 +131,7 @@ class BusproDiscovery:
             }
         ])
 
-        # Добавляем сенсор температуры
+        # Добавляем сенсоры температуры
         self.devices[SENSOR].extend([
             {
                 "subnet_id": 1,
@@ -334,17 +334,33 @@ class BusproDiscovery:
             0x0014: "HDL-MP2B.48",        # 2-кнопочная панель
             0x0028: "HDL-DLP",            # DLP панель
             0x002A: "HDL-DLP-EU",         # Европейская DLP панель
+            0x0086: "HDL-DLP2",           # DLP2 панель
+            0x0095: "HDL-DLP-OLD",        # Старая DLP панель
+            0x009C: "HDL-DLPv2",          # DLP v2 панель
+            
+            # Сенсорные экраны
+            0x0100: "HDL-MPTL14.46",      # Сенсорный экран Granite
+            0x01CC: "HDL-MPTLC43.46",     # Сенсорный экран Granite Classic 4.3"
+            0x01CD: "HDL-MPTLC70.46",     # Сенсорный экран Granite Classic 7"
+            0x03E8: "HDL-MPTL4.3.47",     # Сенсорный экран Granite Display 4.3"
+            0x03E9: "HDL-MPTL7.47",       # Сенсорный экран Granite Display 7"
+            
+            # Сенсорные панели
+            0x012B: "HDL-WS8M",           # 8-клавишная настенная панель
             
             # Контроллеры климата
             0x0073: "HDL-MFHC01.431",     # Контроллер теплого пола
             0x0174: "HDL-MPWPID01.48",    # Модуль управления вентиляторами (фанкойлами)
             0x0270: "HDL-MAC01.331",      # Модуль управления кондиционерами
+            0x0077: "HDL-DRY-4Z",         # Сухой контакт 4-зоны
             
             # Модули освещения
             0x0178: "HDL-MPDI06.40K",     # 6-канальный модуль диммера
             0x0251: "HDL-MD0X04.40",      # 4-канальный модуль диммера для светодиодов
             0x0254: "HDL-MLED02.40K",     # 2-канальный модуль управления LED
             0x0255: "HDL-MLED01.40K",     # 1-канальный модуль управления LED
+            0x0260: "HDL-DN-DT0601",      # 6-канальный универсальный диммер
+            0x026D: "HDL-MDT0601",        # 6-канальный диммер нового типа
             
             # Модули штор/роллет
             0x0180: "HDL-MW02.431",       # 2-канальный модуль управления шторами/жалюзи
@@ -354,11 +370,19 @@ class BusproDiscovery:
             0x0188: "HDL-MR0810.433",     # 8-канальный релейный модуль 10A
             0x0189: "HDL-MR1610.431",     # 16-канальный релейный модуль 10A
             0x018A: "HDL-MR0416.432",     # 4-канальный релейный модуль 16A
+            0x01AC: "HDL-R0816",          # 8-канальное реле
             
             # Сенсоры и мультисенсоры
             0x018C: "HDL-MSPU05.4C",      # Мультисенсор (движение, освещенность, ИК)
             0x018D: "HDL-MS05M.4C",       # Сенсор движения
             0x018E: "HDL-MS12.2C",        # 12-в-1 мультисенсор
+            0x0134: "HDL-CMS-12in1",      # 12-в-1 датчик
+            0x0135: "HDL-CMS-8in1",       # 8-в-1 датчик
+            0x0150: "HDL-MSP07M",         # Мультисенсор
+            
+            # Логика и безопасность
+            0x0453: "HDL-DN-Logic960",    # Логический модуль
+            0x0BE9: "HDL-DN-SEC250K",     # Модуль безопасности
             
             # Шлюзы и интерфейсы
             0x0192: "HDL-MBUS01.431",     # HDL Buspro интерфейс
@@ -376,7 +400,7 @@ class BusproDiscovery:
         # Определяем категорию устройства и количество каналов на основе типа
         
         # DLP панели и интерфейсы управления    
-        if device_type in [0x0028, 0x002A]:  # DLP панели
+        if device_type in [0x0028, 0x002A, 0x0086, 0x0095, 0x009C]:  # DLP панели всех версий
             # Добавляем сенсор температуры для DLP
             temp_device = {
                 "subnet_id": subnet_id,
@@ -406,14 +430,47 @@ class BusproDiscovery:
                 "channels": 1,
             }
         
+        # Сенсорные экраны Granite (0x0100)
+        elif device_type in [0x0100, 0x01CC, 0x01CD, 0x03E8, 0x03E9]:  # Все модели Granite
+            # Добавляем сенсор температуры для экрана Granite
+            temp_device = {
+                "subnet_id": subnet_id,
+                "device_id": device_id,
+                "channel": 1,
+                "name": f"{name} Temp",
+                "model": model,
+                "type": "temperature",
+            }
+            self.devices[SENSOR].append(temp_device)
+            
+            # Добавляем универсальные переключатели для страниц экрана Granite
+            for i in range(1, 13):  # Предполагаем до 12 страниц
+                button_device = {
+                    "subnet_id": subnet_id,
+                    "device_id": device_id,
+                    "channel": 100 + i,  # Универсальные переключатели начинаются с 100
+                    "name": f"{name} Page {i}",
+                    "model": model,
+                    "type": "universal_switch",
+                }
+                self.devices[BINARY_SENSOR].append(button_device)
+            
+            # Экраны Granite также могут управлять климатом, поэтому возвращаем CLIMATE
+            return {
+                "category": CLIMATE,
+                "channels": 1,
+            }
+        
         # Диммеры освещения
-        elif device_type in [0x0178, 0x0251, 0x0254, 0x0255]:
+        elif device_type in [0x0178, 0x0251, 0x0254, 0x0255, 0x0260, 0x026D]:
             # Определяем количество каналов по типу устройства
             channels_map = {
                 0x0178: 6,  # MPDI06.40K - 6 каналов
                 0x0251: 4,  # MD0X04.40 - 4 канала
                 0x0254: 2,  # MLED02.40K - 2 канала
                 0x0255: 1,  # MLED01.40K - 1 канал
+                0x0260: 6,  # DN-DT0601 - 6 каналов
+                0x026D: 6,  # MDT0601 - 6 каналов
             }
             return {
                 "category": LIGHT,
@@ -421,12 +478,13 @@ class BusproDiscovery:
             }
         
         # Релейные модули (выключатели)
-        elif device_type in [0x0188, 0x0189, 0x018A]:
+        elif device_type in [0x0188, 0x0189, 0x018A, 0x01AC]:
             # Определяем количество каналов по типу устройства
             channels_map = {
                 0x0188: 8,   # MR0810.433 - 8 каналов
                 0x0189: 16,  # MR1610.431 - 16 каналов
                 0x018A: 4,   # MR0416.432 - 4 канала
+                0x01AC: 8,   # R0816 - 8 каналов
             }
             return {
                 "category": SWITCH,
@@ -446,12 +504,13 @@ class BusproDiscovery:
             }
         
         # Модули управления системами отопления/охлаждения
-        elif device_type in [0x0073, 0x0174, 0x0270]:
+        elif device_type in [0x0073, 0x0174, 0x0270, 0x0077]:
             # Определяем количество каналов по типу устройства
             channels_map = {
                 0x0073: 4,  # MFHC01.431 - до 4-х зон
                 0x0174: 1,  # MPWPID01.48 - 1 канал
                 0x0270: 1,  # MAC01.331 - 1 канал
+                0x0077: 4,  # DRY-4Z - 4 зоны (сухие контакты для климатического оборудования)
             }
             
             # Добавляем сенсоры температуры для этих устройств
@@ -471,7 +530,7 @@ class BusproDiscovery:
             }
         
         # Мультисенсоры
-        elif device_type in [0x018C, 0x018D, 0x018E]:
+        elif device_type in [0x018C, 0x018D, 0x018E, 0x0134, 0x0135, 0x0150]:
             # Добавляем сенсор движения
             motion_device = {
                 "subnet_id": subnet_id,
@@ -495,7 +554,7 @@ class BusproDiscovery:
             self.devices[SENSOR].append(lux_device)
             
             # Для расширенного мультисенсора добавляем дополнительные сенсоры
-            if device_type == 0x018E:  # MS12.2C
+            if device_type in [0x018E, 0x0134]:  # MS12.2C и CMS-12in1
                 # Добавляем сенсор температуры
                 temp_device = {
                     "subnet_id": subnet_id,
