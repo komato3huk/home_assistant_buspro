@@ -17,6 +17,8 @@ OPERATION_DISCOVERY = 0x000D
 CONF_DEVICE_SUBNET_ID = "device_subnet_id"
 CONF_DEVICE_ID = "device_id"
 CONF_POLL_INTERVAL = "poll_interval"
+CONF_GATEWAY_HOST = "gateway_host"
+CONF_GATEWAY_PORT = "gateway_port"
 
 # Default Values
 DEFAULT_PORT = 6000
@@ -24,6 +26,8 @@ DEFAULT_TIMEOUT = 5  # seconds
 DEFAULT_POLL_INTERVAL = 30  # seconds
 DEFAULT_DEVICE_SUBNET_ID = 200  # Default subnet ID for the gateway
 DEFAULT_DEVICE_ID = 200  # Default device ID for the gateway
+DEFAULT_GATEWAY_HOST = ""  # По умолчанию используем тот же хост, что и для подключения
+DEFAULT_GATEWAY_PORT = 6000  # Стандартный порт для HDL Buspro
 
 # Translations
 ATTR_BRIGHTNESS = "brightness"

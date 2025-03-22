@@ -34,6 +34,10 @@ from .const import (
     CONF_DEVICE_SUBNET_ID,
     CONF_DEVICE_ID,
     CONF_POLL_INTERVAL,
+    CONF_GATEWAY_HOST,
+    CONF_GATEWAY_PORT,
+    DEFAULT_GATEWAY_HOST,
+    DEFAULT_GATEWAY_PORT,
 )
 from .discovery import BusproDiscovery
 from .gateway import BusproGateway
@@ -110,6 +114,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     subnet_id = entry.data.get(CONF_DEVICE_SUBNET_ID, DEFAULT_DEVICE_SUBNET_ID)
     device_id = entry.data.get(CONF_DEVICE_ID, DEFAULT_DEVICE_ID)
     poll_interval = entry.data.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
+    gateway_host = entry.data.get(CONF_GATEWAY_HOST, DEFAULT_GATEWAY_HOST)
+    gateway_port = entry.data.get(CONF_GATEWAY_PORT, DEFAULT_GATEWAY_PORT)
+    
+    # Если шлюз не указан, используем тот же адрес, что и для основного подключения
+    if not gateway_host:
+        gateway_host = host
     
     # Initialize options if they don't exist yet
     if not entry.options:
@@ -118,6 +128,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             CONF_DEVICE_SUBNET_ID: subnet_id,
             CONF_DEVICE_ID: device_id,
             CONF_POLL_INTERVAL: poll_interval,
+            CONF_GATEWAY_HOST: gateway_host,
+            CONF_GATEWAY_PORT: gateway_port,
         }
         hass.config_entries.async_update_entry(entry, options=options)
     else:
@@ -126,10 +138,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         subnet_id = entry.options.get(CONF_DEVICE_SUBNET_ID, subnet_id)
         device_id = entry.options.get(CONF_DEVICE_ID, device_id)
         poll_interval = entry.options.get(CONF_POLL_INTERVAL, poll_interval)
+        gateway_host = entry.options.get(CONF_GATEWAY_HOST, gateway_host)
+        gateway_port = entry.options.get(CONF_GATEWAY_PORT, gateway_port)
     
     _LOGGER.debug(
-        "Connecting to HDL Buspro gateway at %s:%s with device address %d.%d",
-        host, port, subnet_id, device_id
+        "Connecting to HDL Buspro at %s:%s with device address %d.%d, gateway: %s:%s",
+        host, port, subnet_id, device_id, gateway_host, gateway_port
     )
     
     # Create HDL device with source address
@@ -138,7 +152,8 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         port, 
         subnet_id=subnet_id, 
         device_id=device_id,
-        timeout=timeout
+        gateway_host=gateway_host,
+        gateway_port=gateway_port
     )
     
     # Create discovery service

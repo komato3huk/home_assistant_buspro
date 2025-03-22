@@ -3,15 +3,17 @@
     "title": "HDL Buspro",
     "step": {
       "user": {
-        "title": "Set up HDL Buspro Gateway",
-        "description": "Configure your HDL Buspro gateway connection",
+        "title": "HDL Buspro Gateway Setup",
+        "description": "Set up a connection to HDL Buspro gateway",
         "data": {
           "host": "IP Address",
           "port": "Port",
-          "timeout": "Connection Timeout (seconds)",
-          "device_subnet_id": "Gateway Subnet ID (0-255)",
-          "device_id": "Gateway Device ID (0-255)",
-          "poll_interval": "Device Status Poll Interval (seconds)"
+          "timeout": "Connection timeout (seconds)",
+          "device_subnet_id": "Gateway subnet ID (0-255)",
+          "device_id": "Gateway device ID (0-255)",
+          "poll_interval": "Device state polling interval (seconds)",
+          "gateway_host": "HDL-IP Gateway IP address (empty = use main IP)",
+          "gateway_port": "HDL-IP Gateway port"
         }
       },
       "select_devices": {

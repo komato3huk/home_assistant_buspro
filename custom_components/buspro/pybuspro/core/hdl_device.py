@@ -11,10 +11,16 @@ _LOGGER = logging.getLogger(__name__)
 class HDLDevice:
     """Class for interacting with HDL Buspro devices."""
     
-    def __init__(self, host: str, port: int, loop=None):
+    def __init__(self, host: str, port: int, subnet_id: int = 0, device_id: int = 0, 
+                 timeout: int = 5, gateway_host: str = None, gateway_port: int = None, loop=None):
         """Initialize HDL device handler."""
         self.host = host
         self.port = port
+        self.subnet_id = subnet_id
+        self.device_id = device_id
+        self.timeout = timeout
+        self.gateway_host = gateway_host or host
+        self.gateway_port = gateway_port or 6000
         self.loop = loop or asyncio.get_event_loop()
         self.network_interface = None
         self.started = False
@@ -27,12 +33,20 @@ class HDLDevice:
             return
             
         try:
-            self.network_interface = NetworkInterface(self, (self.host, self.port))
+            self.network_interface = NetworkInterface(
+                self, 
+                (self.host, self.port),
+                gateway_host=self.gateway_host,
+                gateway_port=self.gateway_port,
+                device_subnet_id=self.subnet_id,
+                device_id=self.device_id
+            )
             self.network_interface.register_callback(self._handle_message)
             await self.network_interface.start()
             self.started = True
             self.connected = True
-            _LOGGER.info("Connected to HDL Buspro gateway at %s:%s", self.host, self.port)
+            _LOGGER.info("Connected to HDL Buspro gateway at %s:%s with device address %d.%d, using gateway: %s:%s", 
+                        self.host, self.port, self.subnet_id, self.device_id, self.gateway_host, self.gateway_port)
         except Exception as err:
             self.connected = False
             _LOGGER.error("Failed to connect to HDL Buspro gateway: %s", err)

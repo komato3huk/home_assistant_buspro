@@ -21,6 +21,10 @@ from .const import (
     DEFAULT_POLL_INTERVAL,
     DEFAULT_DEVICE_SUBNET_ID,
     DEFAULT_DEVICE_ID,
+    CONF_GATEWAY_HOST,
+    CONF_GATEWAY_PORT,
+    DEFAULT_GATEWAY_HOST,
+    DEFAULT_GATEWAY_PORT,
 )
 from .discovery import BusproDiscovery
 from .pybuspro.core.hdl_device import HDLDevice
@@ -36,6 +40,8 @@ STEP_USER_DATA_SCHEMA = vol.Schema(
         vol.Optional(CONF_DEVICE_SUBNET_ID, default=DEFAULT_DEVICE_SUBNET_ID): int,
         vol.Optional(CONF_DEVICE_ID, default=DEFAULT_DEVICE_ID): int,
         vol.Optional(CONF_POLL_INTERVAL, default=DEFAULT_POLL_INTERVAL): int,
+        vol.Optional(CONF_GATEWAY_HOST, default=DEFAULT_GATEWAY_HOST): str,
+        vol.Optional(CONF_GATEWAY_PORT, default=DEFAULT_GATEWAY_PORT): int,
     }
 )
 
@@ -62,6 +68,13 @@ class BusproConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 ipaddress.ip_address(user_input[CONF_HOST])
             except ValueError:
                 errors[CONF_HOST] = "invalid_host"
+
+            # Если указан IP шлюза, проверяем его тоже
+            if user_input.get(CONF_GATEWAY_HOST):
+                try:
+                    ipaddress.ip_address(user_input[CONF_GATEWAY_HOST])
+                except ValueError:
+                    errors[CONF_GATEWAY_HOST] = "invalid_host"
 
             # Validate subnet ID and device ID
             if not 0 <= user_input[CONF_DEVICE_SUBNET_ID] <= 255:
@@ -178,6 +191,18 @@ class BusproOptionsFlowHandler(config_entries.OptionsFlow):
                 CONF_DEVICE_ID,
                 default=self.config_entry.options.get(
                     CONF_DEVICE_ID, DEFAULT_DEVICE_ID
+                ),
+            ): int,
+            vol.Optional(
+                CONF_GATEWAY_HOST,
+                default=self.config_entry.options.get(
+                    CONF_GATEWAY_HOST, self.config_entry.data.get(CONF_GATEWAY_HOST, DEFAULT_GATEWAY_HOST)
+                ),
+            ): str,
+            vol.Optional(
+                CONF_GATEWAY_PORT,
+                default=self.config_entry.options.get(
+                    CONF_GATEWAY_PORT, self.config_entry.data.get(CONF_GATEWAY_PORT, DEFAULT_GATEWAY_PORT)
                 ),
             ): int,
         }
