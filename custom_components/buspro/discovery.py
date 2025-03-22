@@ -85,92 +85,93 @@ class BusproDiscovery:
         # В реальной имплементации здесь будет отправка discovery-пакетов
         # и обработка ответов
 
-        # Эмулируем некоторые устройства для тестирования
-        # Добавляем несколько реле (switch)
-        self.devices[SWITCH].extend([
+        # Добавляем реальное устройство климат-контроля
+        self.devices[CLIMATE].extend([
             {
-                "subnet_id": subnet_id,
-                "device_id": 1,
+                "subnet_id": 1,
+                "device_id": 4,
                 "channel": 1,
-                "name": f"Relay {subnet_id}.1.1",
-                "model": "HDL-MR0410.433",
-            },
-            {
-                "subnet_id": subnet_id,
-                "device_id": 1,
-                "channel": 2,
-                "name": f"Relay {subnet_id}.1.2",
-                "model": "HDL-MR0410.433",
-            },
-            {
-                "subnet_id": subnet_id,
-                "device_id": 1,
-                "channel": 3,
-                "name": f"Relay {subnet_id}.1.3",
-                "model": "HDL-MR0410.433",
-            },
+                "name": "Теплый пол 1.4",
+                "model": "HDL-MFHC01.431",
+                "device_type": 0x0073,  # Тип устройства для Floor Heating Controller
+            }
         ])
 
-        # Добавляем несколько диммеров (light)
+        # Добавляем контроллер штор
+        self.devices[COVER].extend([
+            {
+                "subnet_id": 1,
+                "device_id": 3,
+                "channel": 1,
+                "name": "Шторы гостиная",
+                "model": "HDL-MW02.431",
+            },
+            {
+                "subnet_id": 1,
+                "device_id": 3,
+                "channel": 2,
+                "name": "Шторы спальня",
+                "model": "HDL-MW02.431", 
+            }
+        ])
+
+        # Добавляем сенсор температуры (необходим для отображения температуры)
+        self.devices[SENSOR].extend([
+            {
+                "subnet_id": 1,
+                "device_id": 4,  # Тот же адрес, что и у климат-контроллера
+                "channel": 1,
+                "name": "Температура пола 1.4",
+                "model": "HDL-MFHC01.431",
+                "type": "temperature",
+            }
+        ])
+
+        # Эмулируем дополнительные устройства для тестирования
+        # Добавляем диммеры (light)
         self.devices[LIGHT].extend([
             {
                 "subnet_id": subnet_id,
                 "device_id": 2,
                 "channel": 1,
-                "name": f"Dimmer {subnet_id}.2.1",
-                "model": "HDL-MDT0401.433",
+                "name": f"Свет 1 ({subnet_id}.2.1)",
+                "model": "HDL-MDT0402.433",
             },
             {
                 "subnet_id": subnet_id,
                 "device_id": 2,
                 "channel": 2,
-                "name": f"Dimmer {subnet_id}.2.2",
-                "model": "HDL-MDT0401.433",
+                "name": f"Свет 2 ({subnet_id}.2.2)",
+                "model": "HDL-MDT0402.433",
             },
         ])
 
-        # Добавляем контроллер штор (cover)
-        self.devices[COVER].extend([
-            {
-                "subnet_id": subnet_id,
-                "device_id": 3,
-                "channel": 1,
-                "name": f"Curtain {subnet_id}.3.1",
-                "model": "HDL-MWM70B.433",
-            }
-        ])
-
-        # Добавляем терморегулятор (climate)
-        self.devices[CLIMATE].extend([
-            {
-                "subnet_id": subnet_id,
-                "device_id": 4,
-                "channel": 1,
-                "name": f"HVAC {subnet_id}.4.1",
-                "model": "HDL-MPAC01.433",
-            }
-        ])
-
-        # Добавляем сенсор температуры (sensor)
-        self.devices[SENSOR].extend([
+        # Добавляем реле (switch)
+        self.devices[SWITCH].extend([
             {
                 "subnet_id": subnet_id,
                 "device_id": 5,
                 "channel": 1,
-                "name": f"Temperature {subnet_id}.5.1",
-                "model": "HDL-MSENSOR.433",
-                "type": "temperature",
-            }
+                "name": f"Розетка 1 ({subnet_id}.5.1)",
+                "model": "HDL-MR0810.433",
+            },
+            {
+                "subnet_id": subnet_id,
+                "device_id": 5,
+                "channel": 2,
+                "name": f"Розетка 2 ({subnet_id}.5.2)",
+                "model": "HDL-MR0810.433",
+            },
         ])
 
         # Добавляем сенсор движения (binary_sensor)
         self.devices[BINARY_SENSOR].extend([
             {
                 "subnet_id": subnet_id,
-                "device_id": 5,
-                "channel": 2,
-                "name": f"Motion {subnet_id}.5.2",
-                "model": "HDL-MSENSOR.433",
+                "device_id": 6,
+                "channel": 1,
+                "name": f"Датчик движения ({subnet_id}.6.1)",
+                "model": "HDL-MSPU05.433",
                 "type": "motion",
             }
         ])

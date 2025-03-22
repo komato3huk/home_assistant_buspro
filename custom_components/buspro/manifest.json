@@ -1,10 +1,10 @@
 {
   "domain": "buspro",
   "name": "HDL Buspro",
-  "codeowners": ["@user"],
-  "documentation": "https://github.com/user/home_assistant_buspro",
+  "codeowners": ["@jbustamante"],
   "config_flow": true,
   "dependencies": [],
+  "documentation": "https://github.com/jbustamante35/home_assistant_buspro",
   "iot_class": "local_push",
   "requirements": [],
   "version": "0.1.0",

@@ -79,20 +79,31 @@ async def async_setup_entry(
     discovery = hass.data[DOMAIN][config_entry.entry_id]["discovery"]
     
     entities = []
+    devices_found = False
     
     # Обрабатываем обнаруженные устройства климат-контроля
     for device in discovery.get_devices_by_type(CLIMATE):
+        devices_found = True
         subnet_id = device["subnet_id"]
-        # Работаем только с устройствами из подсети 1
-        if subnet_id != 1:
-            continue
-            
         device_id = device["device_id"]
         channel = device.get("channel", 1)
         device_name = device.get("name", f"Climate {subnet_id}.{device_id}")
         
+        _LOGGER.info(f"Обнаружено устройство климат-контроля: {device_name} ({subnet_id}.{device_id})")
+        
+        # Специальная обработка для определенных устройств
+        # HDL Buspro Floor Heating Actuator обычно имеет тип 0x0073
+        device_type = device.get("device_type", 0)
+        _LOGGER.debug(f"Тип устройства климат-контроля: 0x{device_type:04X}")
+        
         # Создаем сущность климат-контроля
         entity = BusproClimate(gateway, subnet_id, device_id, device_name)
+        entities.append(entity)
+    
+    # Если устройства не обнаружены, добавляем их вручную для отладки
+    if not devices_found:
+        _LOGGER.info(f"Устройства климат-контроля не обнаружены. Добавляем устройство вручную для отладки.")
+        entity = BusproClimate(gateway, 1, 4, "Floor Heating 1.4")
         entities.append(entity)
     
     if entities:
@@ -372,6 +383,8 @@ class BusproClimate(ClimateEntity):
     async def async_update(self) -> None:
         """Fetch new state data for this climate device."""
         try:
+            _LOGGER.debug(f"Запрос обновления для устройства климат-контроля {self._subnet_id}.{self._device_id}")
+            
             # Создаем телеграмму для запроса статуса
             telegram = {
                 "subnet_id": self._subnet_id,
@@ -381,9 +394,11 @@ class BusproClimate(ClimateEntity):
             }
             
             # Отправляем запрос через шлюз
+            _LOGGER.debug(f"Отправка запроса данных для {self._subnet_id}.{self._device_id}: {telegram}")
             response = await self._gateway.send_telegram(telegram)
+            _LOGGER.debug(f"Получен ответ от {self._subnet_id}.{self._device_id}: {response}")
             
-            if response and "data" in response:
+            if response and isinstance(response, dict) and "data" in response and response["data"]:
                 data = response["data"]
                 
                 if len(data) >= 8:
@@ -396,6 +411,11 @@ class BusproClimate(ClimateEntity):
                     day_temp = data[5] / 10.0
                     night_temp = data[6] / 10.0
                     away_temp = data[7] / 10.0
+                    
+                    _LOGGER.debug(f"Климат-контроль {self._subnet_id}.{self._device_id}: " +
+                                  f"тип={temperature_type}, текущая={current_temp}°C, статус={status}, " +
+                                  f"режим={mode}, уставка_обычная={normal_temp}°C, уставка_день={day_temp}°C, " +
+                                  f"уставка_ночь={night_temp}°C, уставка_отсутствие={away_temp}°C")
                     
                     # Обновляем состояние устройства
                     self._current_temperature = current_temp
@@ -435,11 +455,23 @@ class BusproClimate(ClimateEntity):
                     self._available = True
                     _LOGGER.debug(f"Обновлено состояние устройства климат-контроля {self._subnet_id}.{self._device_id}")
                 else:
+                    # При недостаточном количестве данных не меняем статус доступности
                     _LOGGER.warning(f"Получен неполный ответ от устройства климат-контроля {self._subnet_id}.{self._device_id}: {data}")
             else:
-                _LOGGER.warning(f"Не удалось получить данные от устройства климат-контроля {self._subnet_id}.{self._device_id}")
-                self._available = False
+                # Если устройство доступно, но ответ пустой, сохраняем текущее состояние устройства
+                # и не меняем доступность
+                if self._available:
+                    _LOGGER.debug(f"Устройство климат-контроля {self._subnet_id}.{self._device_id} не вернуло данных, используем предыдущее состояние")
+                else:
+                    _LOGGER.warning(f"Не удалось получить данные от устройства климат-контроля {self._subnet_id}.{self._device_id}")
+                    # Устанавливаем по умолчанию статус доступности только при первом запуске
+                    # при отсутствии данных
+                    if self._current_temperature is None:
+                        self._available = False
             
         except Exception as err:
-            _LOGGER.error(f"Ошибка при обновлении состояния устройства климат-контроля: {err}")
-            self._available = False
+            _LOGGER.error(f"Ошибка при обновлении состояния устройства климат-контроля {self._subnet_id}.{self._device_id}: {err}")
+            # Не меняем доступность, если произошла временная ошибка
+            # Это позволит избежать мигания устройства в интерфейсе
+            if self._current_temperature is None:
+                self._available = False

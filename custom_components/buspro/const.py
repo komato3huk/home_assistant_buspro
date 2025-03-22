@@ -2,6 +2,16 @@
 
 import logging
 from datetime import timedelta
+from homeassistant.components.sensor import (
+    SensorDeviceClass,
+    SensorStateClass,
+)
+from homeassistant.const import (
+    UnitOfTemperature,
+    PERCENTAGE,
+    UnitOfIlluminance,
+    UnitOfTime,
+)
 
 DOMAIN = "buspro"
 DEFAULT_NAME = "HDL Buspro"
@@ -17,26 +27,95 @@ CONF_GATEWAY_PORT = "gateway_port"
 CONF_TIMEOUT = "timeout"
 CONF_GATEWAY_NAME = "gateway_name"
 
-# Значения по умолчанию
-DEFAULT_PORT = 10000
-DEFAULT_TIMEOUT = 5
-DEFAULT_DEVICE_SUBNET_ID = 0
-DEFAULT_DEVICE_ID = 1
-DEFAULT_POLL_INTERVAL = 30
-DEFAULT_GATEWAY_HOST = "255.255.255.255"  # Broadcast
-DEFAULT_GATEWAY_PORT = 6000
+# IP-адрес и порт по умолчанию для шлюза HDL Buspro
+DEFAULT_HOST = "192.168.1.1"
+DEFAULT_PORT = 6000
+DEFAULT_TIMEOUT = 3  # Тайм-аут запросов в секундах
+DEFAULT_POLL_INTERVAL = 30  # Интервал опроса устройств в секундах
+
+# Базовые коды операций для протокола HDL Buspro
+OPERATION_READ_STATUS = 0x0031  # Чтение состояния устройства
+OPERATION_WRITE = 0x0032  # Запись значения в устройство
 
 # Типы устройств
-LIGHT = "light"
-SWITCH = "switch"
-COVER = "cover"
-CLIMATE = "climate"
-SENSOR = "sensor"
+DEVICE_TYPES = {
+    "binary_sensor": "binary_sensor",
+    "climate": "climate",
+    "cover": "cover",
+    "light": "light",
+    "sensor": "sensor",
+    "switch": "switch",
+}
+
+# Типы датчиков, поддерживаемые интеграцией
+SENSOR_TYPES = {
+    # Температура
+    0x01: {
+        "name": "Temperature",
+        "device_class": SensorDeviceClass.TEMPERATURE,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": UnitOfTemperature.CELSIUS,
+        "multiplier": 0.1,  # Множитель для преобразования сырого значения
+        "icon": "mdi:thermometer",
+    },
+    # Влажность
+    0x02: {
+        "name": "Humidity",
+        "device_class": SensorDeviceClass.HUMIDITY,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": PERCENTAGE,
+        "multiplier": 1.0,
+        "icon": "mdi:water-percent",
+    },
+    # Освещенность
+    0x03: {
+        "name": "Illuminance",
+        "device_class": SensorDeviceClass.ILLUMINANCE,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": UnitOfIlluminance.LUX,
+        "multiplier": 1.0,
+        "icon": "mdi:brightness-5",
+    },
+    # Скорость ветра (для метеостанции)
+    0x04: {
+        "name": "Wind Speed",
+        "device_class": None,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": "m/s",
+        "multiplier": 0.1,
+        "icon": "mdi:weather-windy",
+    },
+    # CO2 (для датчика качества воздуха)
+    0x05: {
+        "name": "CO2",
+        "device_class": SensorDeviceClass.CO2,
+        "state_class": SensorStateClass.MEASUREMENT,
+        "unit": "ppm",
+        "multiplier": 1.0,
+        "icon": "mdi:molecule-co2",
+    },
+}
+
+# Конфигурация для Home Assistant
+CONF_SUBNET_ID = "subnet_id"
+CONF_DEVICE_ID = "device_id"
+CONF_HOST = "host"
+CONF_PORT = "port"
+CONF_TIMEOUT = "timeout"
+CONF_POLL_INTERVAL = "poll_interval"
+CONF_DEVICE_SUBNET_ID = "device_subnet_id"
+CONF_PRESET_MODES = "preset_modes"
+
+# Названия типов компонентов для конфигурационного файла
 BINARY_SENSOR = "binary_sensor"
+CLIMATE = "climate"
+COVER = "cover"
+LIGHT = "light"
+SENSOR = "sensor"
+SWITCH = "switch"
 
 # Операционные коды HDL
 OPERATION_DISCOVERY = 0x000E
-OPERATION_READ_STATUS = 0x000C
 OPERATION_SINGLE_CHANNEL = 0x0031
 OPERATION_SCENE_CONTROL = 0x0002
 OPERATION_UNIVERSAL_SWITCH = 0x0003
@@ -89,29 +168,6 @@ DEVICE_TYPE_LIGHT = "light"
 DEVICE_TYPE_COVER = "cover"
 DEVICE_TYPE_CLIMATE = "climate"
 DEVICE_TYPE_SENSOR = "sensor"
-
-# Platform constants
-LIGHT = "light"
-COVER = "cover"
-CLIMATE = "climate"
-SENSOR = "sensor"
-BINARY_SENSOR = "binary_sensor"
-SWITCH = "switch"
-
-# Configuration constants
-CONF_DEVICE_SUBNET_ID = "device_subnet_id"
-CONF_DEVICE_ID = "device_id"
-CONF_POLL_INTERVAL = "poll_interval"
-CONF_GATEWAY_HOST = "gateway_host"
-CONF_GATEWAY_PORT = "gateway_port"
-
-# Default Values
-DEFAULT_PORT = 6000
-DEFAULT_TIMEOUT = 5  # seconds
-DEFAULT_DEVICE_SUBNET_ID = 200  # Default subnet ID for the gateway
-DEFAULT_DEVICE_ID = 200  # Default device ID for the gateway
-DEFAULT_GATEWAY_HOST = ""  # По умолчанию используем тот же хост, что и для подключения
-DEFAULT_GATEWAY_PORT = 6000  # Стандартный порт для HDL Buspro
 
 # Mapping string types from configuration.yaml to internal types
 SENSOR_TYPE_STRINGS = {

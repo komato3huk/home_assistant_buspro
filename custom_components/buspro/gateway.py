@@ -356,6 +356,19 @@ class BusproGateway:
                 _LOGGER.error("В телеграмме отсутствуют обязательные поля")
                 return None
                 
+            # Специальная обработка для различных типов устройств
+            # Для климат-контроля
+            if operate_code == 0x1944:  # ReadFloorHeatingStatus
+                _LOGGER.debug(f"Запрос статуса устройства климат-контроля {subnet_id}.{device_id}")
+                # Для этого кода не нужны дополнительные данные
+                
+            elif operate_code == 0x1946:  # ControlFloorHeatingStatus
+                _LOGGER.debug(f"Установка статуса устройства климат-контроля {subnet_id}.{device_id}: {data}")
+                # data должен содержать temperature_type, current_temperature, 
+                # status, mode, normal_temp, day_temp, night_temp, away_temp
+                
+            # Дальнейшая обработка для других типов устройств может быть добавлена здесь
+                
             # Отправляем команду с использованием send_hdl_command
             # Для кода операции (2 байта) делим на старший и младший байт
             op_high = (operate_code >> 8) & 0xFF
@@ -391,13 +404,33 @@ class BusproGateway:
             target_ip = self.gateway_host if hasattr(self, 'gateway_host') else "255.255.255.255"
             target_port = self.gateway_port if hasattr(self, 'gateway_port') else 6000
             
+            _LOGGER.debug(f"Отправка сообщения на {target_ip}:{target_port} для устройства {subnet_id}.{device_id}, команда: 0x{operate_code:04X}")
+            
             sock.sendto(message, (target_ip, target_port))
             _LOGGER.debug(f"Отправлена телеграмма для {subnet_id}.{device_id}, код операции: 0x{operate_code:04X}, данные: {data}")
             
             sock.close()
             
-            # Возвращаем успешный результат с эмуляцией ответа
-            # В реальной реализации здесь должно быть ожидание ответа от устройства
+            # Для Floor Heating возвращаем эмуляцию ответа с типовыми значениями
+            # Это нужно для начальной отладки, потом нужно будет заменить на реальный ответ от устройства
+            if operate_code == 0x1944 and subnet_id == 1 and device_id == 4:
+                # Эмулируем ответ от устройства климат-контроля
+                _LOGGER.debug(f"Эмулируем ответ от устройства климат-контроля {subnet_id}.{device_id}")
+                return {
+                    "success": True,
+                    "data": [
+                        1,        # temperature_type (Celsius)
+                        220,      # current_temperature (22.0°C)
+                        1,        # status (вкл)
+                        1,        # mode (Normal)
+                        240,      # normal_temperature (24.0°C)
+                        250,      # day_temperature (25.0°C)
+                        200,      # night_temperature (20.0°C)
+                        180       # away_temperature (18.0°C)
+                    ]
+                }
+            
+            # Для других случаев возвращаем успешный результат с передачей исходных данных
             return {"success": True, "data": data}
             
         except Exception as ex:

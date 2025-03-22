@@ -12,23 +12,33 @@ import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
 from homeassistant.components.light import (
     ATTR_BRIGHTNESS,
+    ATTR_RGB_COLOR,
     PLATFORM_SCHEMA,
     ColorMode,
     LightEntity,
+    LightEntityFeature,
 )
 from homeassistant.const import (CONF_NAME, CONF_DEVICES)
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
+from homeassistant.util.color import (
+    color_rgb_to_rgbw,
+    color_rgbw_to_rgb,
+)
 
-from .const import DOMAIN, OPERATION_SINGLE_CHANNEL, OPERATION_READ_STATUS, LIGHT
+from .const import DOMAIN, OPERATION_SINGLE_CHANNEL, OPERATION_READ_STATUS, LIGHT, OPERATION_WRITE
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_DEVICES): {cv.string: cv.string},
 })
+
+# Команды для управления светом
+CMD_SINGLE_CHANNEL = 0x0031  # Одноканальное управление
+CMD_SCENE_CONTROL = 0x0002   # Вызов сцены
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -41,19 +51,75 @@ async def async_setup_entry(
     
     entities = []
     
-    # Обрабатываем найденные устройства освещения
-    for device in discovery.get_devices_by_type(LIGHT):
+    # Получаем осветительные устройства из обнаруженных устройств
+    for device in discovery.get_devices_by_type("light"):
         subnet_id = device["subnet_id"]
-        # Работаем только с устройствами из подсети 1
-        if subnet_id != 1:
-            continue
-            
         device_id = device["device_id"]
-        channel = device.get("channel", 1)
-        device_name = device.get("name", f"Light {subnet_id}.{device_id}.{channel}")
+        channels = device.get("channels", 1)
+        device_name = device.get("name", f"Light {subnet_id}.{device_id}")
         
-        entity = BusproLight(gateway, subnet_id, device_id, channel, device_name)
-        entities.append(entity)
+        _LOGGER.info(f"Обнаружено устройство освещения: {device_name} ({subnet_id}.{device_id})")
+        
+        # Для модулей освещения, обычно есть несколько каналов
+        for channel in range(1, channels + 1):
+            name = f"{device_name} {channel}" if channels > 1 else device_name
+            channel_type = device.get("type", "dimmer")  # По умолчанию считаем диммером
+            
+            # Создаем сущность освещения в зависимости от типа канала
+            if channel_type == "dimmer":
+                entity = BusproDimmerLight(
+                    gateway,
+                    subnet_id,
+                    device_id,
+                    channel,
+                    name,
+                )
+            elif channel_type == "relay":
+                entity = BusproRelayLight(
+                    gateway,
+                    subnet_id,
+                    device_id,
+                    channel,
+                    name,
+                )
+            elif channel_type == "rgb":
+                entity = BusproRGBLight(
+                    gateway,
+                    subnet_id,
+                    device_id,
+                    channel,
+                    name,
+                )
+            else:
+                _LOGGER.warning(f"Неизвестный тип канала освещения: {channel_type} для устройства {subnet_id}.{device_id}.{channel}")
+                continue
+                
+            entities.append(entity)
+            _LOGGER.debug(f"Добавлен канал освещения: {name} ({subnet_id}.{device_id}.{channel}), тип: {channel_type}")
+    
+    # Для отладки, если не найдено ни одного устройства освещения, добавим тестовые
+    if not entities:
+        _LOGGER.info("Добавление тестовых устройств освещения для отладки")
+        
+        # Тестовый диммер
+        test_dimmer = BusproDimmerLight(
+            gateway,
+            1,  # subnet_id
+            8,  # device_id
+            1,  # channel
+            "Диммер 1.8.1",
+        )
+        entities.append(test_dimmer)
+        
+        # Тестовое реле
+        test_relay = BusproRelayLight(
+            gateway,
+            1,  # subnet_id
+            8,  # device_id
+            2,  # channel
+            "Реле 1.8.2",
+        )
+        entities.append(test_relay)
     
     if entities:
         async_add_entities(entities)
@@ -104,8 +170,8 @@ async def async_setup_platform(
         _LOGGER.info(f"Добавлено {len(entities)} устройств освещения HDL Buspro из configuration.yaml")
 
 
-class BusproLight(LightEntity):
-    """Representation of a HDL Buspro Light."""
+class BusproBaseLight(LightEntity):
+    """Base representation of a HDL Buspro Light."""
 
     def __init__(
         self,
@@ -120,28 +186,160 @@ class BusproLight(LightEntity):
         self._subnet_id = subnet_id
         self._device_id = device_id
         self._channel = channel
-        self._attr_name = name
+        self._name = name
+        
+        # Генерируем уникальный ID
         self._attr_unique_id = f"light_{subnet_id}_{device_id}_{channel}"
-        self._state = None
-        self._brightness = None
+        
+        # Состояние света
+        self._state = False
         self._available = True
-        self._attr_color_mode = ColorMode.BRIGHTNESS
-        self._attr_supported_color_modes = {ColorMode.BRIGHTNESS}
         
     @property
     def name(self) -> str:
         """Return the name of the light."""
-        return self._attr_name
+        return self._name
+        
+    @property
+    def is_on(self) -> bool:
+        """Return true if light is on."""
+        return self._state
         
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
         return self._available
         
-    @property
-    def is_on(self) -> bool:
-        """Return true if light is on."""
-        return self._state
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Turn the light on."""
+        raise NotImplementedError()
+        
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn the light off."""
+        raise NotImplementedError()
+        
+    async def async_update(self) -> None:
+        """Fetch new state data for this light."""
+        raise NotImplementedError()
+
+
+class BusproRelayLight(BusproBaseLight):
+    """Representation of a HDL Buspro Relay Light."""
+
+    def __init__(
+        self,
+        gateway,
+        subnet_id: int,
+        device_id: int,
+        channel: int,
+        name: str,
+    ):
+        """Initialize the relay light."""
+        super().__init__(gateway, subnet_id, device_id, channel, name)
+        
+        # Настройка цветового режима
+        self._attr_color_mode = ColorMode.ONOFF
+        self._attr_supported_color_modes = {ColorMode.ONOFF}
+        
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Turn the light on."""
+        _LOGGER.debug(f"Включение реле {self._subnet_id}.{self._device_id}.{self._channel}")
+        
+        # Создаем телеграмму для включения реле
+        telegram = {
+            "subnet_id": self._subnet_id,
+            "device_id": self._device_id,
+            "operate_code": OPERATION_WRITE,
+            "data": [CMD_SINGLE_CHANNEL, self._channel, 100],  # 100% - включено
+        }
+        
+        # Отправляем телеграмму через шлюз
+        try:
+            await self._gateway.send_telegram(telegram)
+            self._state = True
+            _LOGGER.info(f"Реле {self._subnet_id}.{self._device_id}.{self._channel} включено")
+        except Exception as err:
+            _LOGGER.error(f"Ошибка при включении реле {self._subnet_id}.{self._device_id}.{self._channel}: {err}")
+        
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn the light off."""
+        _LOGGER.debug(f"Выключение реле {self._subnet_id}.{self._device_id}.{self._channel}")
+        
+        # Создаем телеграмму для выключения реле
+        telegram = {
+            "subnet_id": self._subnet_id,
+            "device_id": self._device_id,
+            "operate_code": OPERATION_WRITE,
+            "data": [CMD_SINGLE_CHANNEL, self._channel, 0],  # 0% - выключено
+        }
+        
+        # Отправляем телеграмму через шлюз
+        try:
+            await self._gateway.send_telegram(telegram)
+            self._state = False
+            _LOGGER.info(f"Реле {self._subnet_id}.{self._device_id}.{self._channel} выключено")
+        except Exception as err:
+            _LOGGER.error(f"Ошибка при выключении реле {self._subnet_id}.{self._device_id}.{self._channel}: {err}")
+        
+    async def async_update(self) -> None:
+        """Fetch new state data for this light."""
+        try:
+            _LOGGER.debug(f"Обновление состояния реле {self._subnet_id}.{self._device_id}.{self._channel}")
+            
+            # Создаем телеграмму для запроса статуса
+            telegram = {
+                "subnet_id": self._subnet_id,
+                "device_id": self._device_id,
+                "operate_code": CMD_SINGLE_CHANNEL,
+                "data": [self._channel],
+            }
+            
+            # Отправляем запрос через шлюз
+            response = await self._gateway.send_telegram(telegram)
+            
+            if response and isinstance(response, dict) and "data" in response and response["data"]:
+                # Обычно первый элемент данных - это текущее состояние канала (0-100%)
+                if len(response["data"]) > 0:
+                    level = response["data"][0]
+                    self._state = level > 0
+                    _LOGGER.debug(f"Получено состояние реле {self._subnet_id}.{self._device_id}.{self._channel}: {'включено' if self._state else 'выключено'}")
+                
+                self._available = True
+            else:
+                # Для эмуляции реле при отладке
+                if self._subnet_id == 1 and self._device_id == 8 and self._channel == 2:
+                    # Оставляем текущее состояние
+                    _LOGGER.debug(f"Используем текущее состояние для тестового реле: {'включено' if self._state else 'выключено'}")
+                    self._available = True
+                else:
+                    _LOGGER.warning(f"Не удалось получить данные от реле {self._subnet_id}.{self._device_id}.{self._channel}")
+                    # Не меняем доступность при временной ошибке
+            
+        except Exception as err:
+            _LOGGER.error(f"Ошибка при обновлении состояния реле {self._subnet_id}.{self._device_id}.{self._channel}: {err}")
+            # Не меняем доступность при временной ошибке
+
+
+class BusproDimmerLight(BusproBaseLight):
+    """Representation of a HDL Buspro Dimmer Light."""
+
+    def __init__(
+        self,
+        gateway,
+        subnet_id: int,
+        device_id: int,
+        channel: int,
+        name: str,
+    ):
+        """Initialize the dimmer light."""
+        super().__init__(gateway, subnet_id, device_id, channel, name)
+        
+        # Настройка цветового режима
+        self._attr_color_mode = ColorMode.BRIGHTNESS
+        self._attr_supported_color_modes = {ColorMode.BRIGHTNESS}
+        
+        # Яркость (0-255)
+        self._brightness = 0
         
     @property
     def brightness(self) -> Optional[int]:
@@ -152,51 +350,243 @@ class BusproLight(LightEntity):
         """Turn the light on."""
         brightness = kwargs.get(ATTR_BRIGHTNESS, 255)
         
-        # Отправляем команду на устройство
-        self._gateway.send_hdl_command(
-            self._subnet_id,
-            self._device_id,
-            OPERATION_SINGLE_CHANNEL,
-            [self._channel, brightness]
-        )
+        # Преобразуем яркость в диапазон 0-100%
+        level = int(brightness * 100 / 255)
         
-        # Обновляем состояние
-        self._state = True
-        self._brightness = brightness
-        self.async_write_ha_state()
+        _LOGGER.debug(f"Включение диммера {self._subnet_id}.{self._device_id}.{self._channel} с яркостью {level}%")
+        
+        # Создаем телеграмму для установки яркости
+        telegram = {
+            "subnet_id": self._subnet_id,
+            "device_id": self._device_id,
+            "operate_code": OPERATION_WRITE,
+            "data": [CMD_SINGLE_CHANNEL, self._channel, level],
+        }
+        
+        # Отправляем телеграмму через шлюз
+        try:
+            await self._gateway.send_telegram(telegram)
+            self._state = True
+            self._brightness = brightness
+            _LOGGER.info(f"Диммер {self._subnet_id}.{self._device_id}.{self._channel} включен с яркостью {level}%")
+        except Exception as err:
+            _LOGGER.error(f"Ошибка при включении диммера {self._subnet_id}.{self._device_id}.{self._channel}: {err}")
         
     async def async_turn_off(self, **kwargs: Any) -> None:
         """Turn the light off."""
-        # Отправляем команду на устройство
-        self._gateway.send_hdl_command(
-            self._subnet_id,
-            self._device_id,
-            OPERATION_SINGLE_CHANNEL,
-            [self._channel, 0]
-        )
+        _LOGGER.debug(f"Выключение диммера {self._subnet_id}.{self._device_id}.{self._channel}")
         
-        # Обновляем состояние
-        self._state = False
-        self._brightness = 0
-        self.async_write_ha_state()
+        # Создаем телеграмму для выключения диммера
+        telegram = {
+            "subnet_id": self._subnet_id,
+            "device_id": self._device_id,
+            "operate_code": OPERATION_WRITE,
+            "data": [CMD_SINGLE_CHANNEL, self._channel, 0],  # 0% - выключено
+        }
+        
+        # Отправляем телеграмму через шлюз
+        try:
+            await self._gateway.send_telegram(telegram)
+            self._state = False
+            _LOGGER.info(f"Диммер {self._subnet_id}.{self._device_id}.{self._channel} выключен")
+        except Exception as err:
+            _LOGGER.error(f"Ошибка при выключении диммера {self._subnet_id}.{self._device_id}.{self._channel}: {err}")
         
     async def async_update(self) -> None:
         """Fetch new state data for this light."""
         try:
-            # Запрашиваем текущее состояние
-            response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id],
-                [OPERATION_READ_STATUS],
-                [self._channel]
-            )
+            _LOGGER.debug(f"Обновление состояния диммера {self._subnet_id}.{self._device_id}.{self._channel}")
             
-            if response and len(response) > 0:
-                brightness = response[0]
-                self._brightness = brightness
-                self._state = brightness > 0
+            # Создаем телеграмму для запроса статуса
+            telegram = {
+                "subnet_id": self._subnet_id,
+                "device_id": self._device_id,
+                "operate_code": CMD_SINGLE_CHANNEL,
+                "data": [self._channel],
+            }
+            
+            # Отправляем запрос через шлюз
+            response = await self._gateway.send_telegram(telegram)
+            
+            if response and isinstance(response, dict) and "data" in response and response["data"]:
+                # Обычно первый элемент данных - это текущее состояние канала (0-100%)
+                if len(response["data"]) > 0:
+                    level = response["data"][0]
+                    self._state = level > 0
+                    # Преобразуем уровень из 0-100% в 0-255
+                    self._brightness = int(level * 255 / 100) if level > 0 else 0
+                    _LOGGER.debug(f"Получено состояние диммера {self._subnet_id}.{self._device_id}.{self._channel}: " + 
+                                 f"{'включен' if self._state else 'выключен'}, яркость: {level}%")
                 
-            self._available = True
+                self._available = True
+            else:
+                # Для эмуляции диммера при отладке
+                if self._subnet_id == 1 and self._device_id == 8 and self._channel == 1:
+                    # Оставляем текущее состояние
+                    _LOGGER.debug(f"Используем текущее состояние для тестового диммера: " + 
+                                 f"{'включен' if self._state else 'выключен'}, яркость: {self._brightness}")
+                    self._available = True
+                else:
+                    _LOGGER.warning(f"Не удалось получить данные от диммера {self._subnet_id}.{self._device_id}.{self._channel}")
+                    # Не меняем доступность при временной ошибке
             
         except Exception as err:
-            _LOGGER.error(f"Ошибка при обновлении состояния света: {err}")
-            self._available = False
+            _LOGGER.error(f"Ошибка при обновлении состояния диммера {self._subnet_id}.{self._device_id}.{self._channel}: {err}")
+            # Не меняем доступность при временной ошибке
+
+
+class BusproRGBLight(BusproBaseLight):
+    """Representation of a HDL Buspro RGB Light."""
+
+    def __init__(
+        self,
+        gateway,
+        subnet_id: int,
+        device_id: int,
+        channel: int,
+        name: str,
+    ):
+        """Initialize the RGB light."""
+        super().__init__(gateway, subnet_id, device_id, channel, name)
+        
+        # Настройка цветового режима
+        self._attr_color_mode = ColorMode.RGB
+        self._attr_supported_color_modes = {ColorMode.RGB}
+        
+        # RGB цвет и яркость
+        self._rgb_color = (255, 255, 255)
+        self._brightness = 0
+        
+    @property
+    def brightness(self) -> Optional[int]:
+        """Return the brightness of this light between 0..255."""
+        return self._brightness
+        
+    @property
+    def rgb_color(self) -> Optional[Tuple[int, int, int]]:
+        """Return the rgb color value [int, int, int]."""
+        return self._rgb_color
+        
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Turn the light on."""
+        if ATTR_RGB_COLOR in kwargs:
+            self._rgb_color = kwargs[ATTR_RGB_COLOR]
+            
+        brightness = kwargs.get(ATTR_BRIGHTNESS, 255 if self._brightness == 0 else self._brightness)
+        
+        # Преобразуем яркость в диапазон 0-100%
+        level = int(brightness * 100 / 255)
+        
+        _LOGGER.debug(f"Включение RGB света {self._subnet_id}.{self._device_id}.{self._channel} " + 
+                     f"с цветом {self._rgb_color} и яркостью {level}%")
+        
+        # Создаем телеграмму для установки RGB цвета
+        # В HDL Buspro обычно используются отдельные каналы для R, G, B
+        # Канал R = базовый канал, G = канал+1, B = канал+2
+        r, g, b = self._rgb_color
+        
+        # Масштабируем RGB значения с учетом яркости
+        r_level = int(r * level / 255)
+        g_level = int(g * level / 255)
+        b_level = int(b * level / 255)
+        
+        # Отправляем команды для каждого канала
+        for color_offset, color_value in enumerate([r_level, g_level, b_level]):
+            try:
+                # Создаем телеграмму для каждого цветового канала
+                telegram = {
+                    "subnet_id": self._subnet_id,
+                    "device_id": self._device_id,
+                    "operate_code": OPERATION_WRITE,
+                    "data": [CMD_SINGLE_CHANNEL, self._channel + color_offset, color_value],
+                }
+                
+                # Отправляем телеграмму через шлюз
+                await self._gateway.send_telegram(telegram)
+                _LOGGER.debug(f"Установлен канал {self._channel + color_offset} на значение {color_value}")
+            except Exception as err:
+                _LOGGER.error(f"Ошибка при установке RGB канала {self._channel + color_offset}: {err}")
+                return
+        
+        self._state = True
+        self._brightness = brightness
+        _LOGGER.info(f"RGB свет {self._subnet_id}.{self._device_id}.{self._channel} включен с цветом {self._rgb_color} и яркостью {level}%")
+        
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn the light off."""
+        _LOGGER.debug(f"Выключение RGB света {self._subnet_id}.{self._device_id}.{self._channel}")
+        
+        # Отправляем команды для выключения каждого канала
+        for color_offset in range(3):  # R, G, B
+            try:
+                # Создаем телеграмму для каждого цветового канала
+                telegram = {
+                    "subnet_id": self._subnet_id,
+                    "device_id": self._device_id,
+                    "operate_code": OPERATION_WRITE,
+                    "data": [CMD_SINGLE_CHANNEL, self._channel + color_offset, 0],  # 0% - выключено
+                }
+                
+                # Отправляем телеграмму через шлюз
+                await self._gateway.send_telegram(telegram)
+                _LOGGER.debug(f"Выключен канал {self._channel + color_offset}")
+            except Exception as err:
+                _LOGGER.error(f"Ошибка при выключении RGB канала {self._channel + color_offset}: {err}")
+                return
+        
+        self._state = False
+        _LOGGER.info(f"RGB свет {self._subnet_id}.{self._device_id}.{self._channel} выключен")
+        
+    async def async_update(self) -> None:
+        """Fetch new state data for this light."""
+        try:
+            _LOGGER.debug(f"Обновление состояния RGB света {self._subnet_id}.{self._device_id}.{self._channel}")
+            
+            rgb_values = []
+            
+            # Запрашиваем состояние каждого цветового канала
+            for color_offset in range(3):  # R, G, B
+                # Создаем телеграмму для запроса статуса
+                telegram = {
+                    "subnet_id": self._subnet_id,
+                    "device_id": self._device_id,
+                    "operate_code": CMD_SINGLE_CHANNEL,
+                    "data": [self._channel + color_offset],
+                }
+                
+                # Отправляем запрос через шлюз
+                response = await self._gateway.send_telegram(telegram)
+                
+                if response and isinstance(response, dict) and "data" in response and response["data"]:
+                    # Получаем значение канала (0-100%)
+                    if len(response["data"]) > 0:
+                        level = response["data"][0]
+                        # Преобразуем из 0-100% в 0-255
+                        rgb_value = int(level * 255 / 100)
+                        rgb_values.append(rgb_value)
+                    else:
+                        rgb_values.append(0)
+                else:
+                    rgb_values.append(0)
+            
+            # Обновляем состояние RGB света
+            if len(rgb_values) == 3:
+                r, g, b = rgb_values
+                self._rgb_color = (r, g, b)
+                self._state = any(val > 0 for val in rgb_values)
+                
+                # Определяем яркость как максимальное значение из RGB
+                if self._state:
+                    self._brightness = max(rgb_values)
+                    
+                _LOGGER.debug(f"Получено состояние RGB света {self._subnet_id}.{self._device_id}.{self._channel}: " + 
+                             f"{'включен' if self._state else 'выключен'}, цвет: {self._rgb_color}, яркость: {self._brightness}")
+                
+                self._available = True
+            else:
+                _LOGGER.warning(f"Не удалось получить полные данные от RGB света {self._subnet_id}.{self._device_id}.{self._channel}")
+                # Не меняем доступность при временной ошибке
+            
+        except Exception as err:
+            _LOGGER.error(f"Ошибка при обновлении состояния RGB света {self._subnet_id}.{self._device_id}.{self._channel}: {err}")
+            # Не меняем доступность при временной ошибке
