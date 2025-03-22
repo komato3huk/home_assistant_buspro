@@ -15,6 +15,7 @@ from homeassistant.components.cover import (
     CoverDeviceClass,
     CoverEntity,
     CoverEntityFeature,
+    PLATFORM_SCHEMA,
 )
 from homeassistant.const import CONF_NAME, CONF_DEVICES
 from homeassistant.core import HomeAssistant, callback
