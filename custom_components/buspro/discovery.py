@@ -43,6 +43,8 @@ class BusproDiscovery:
             SENSOR: [],
             BINARY_SENSOR: [],
         }
+        # Хранение информации о неизвестных типах устройств
+        self.unknown_device_types = set()
         self._callbacks = []
 
     async def discover_devices(self, subnet_id: int = None, timeout: int = 5) -> Dict[str, List[Dict[str, Any]]]:
@@ -83,6 +85,35 @@ class BusproDiscovery:
         # Логируем результаты обнаружения
         total_devices = sum(len(devices) for devices in self.devices.values())
         _LOGGER.info(f"Обнаружено устройств HDL Buspro: {total_devices}")
+        
+        # Подробный вывод всех обнаруженных ID устройств
+        _LOGGER.info("=" * 50)
+        _LOGGER.info("СПИСОК ВСЕХ ОБНАРУЖЕННЫХ УСТРОЙСТВ HDL BUSPRO:")
+        _LOGGER.info("=" * 50)
+        
+        # Создадим словарь для хранения уникальных устройств (subnet_id, device_id) -> device_type
+        unique_devices = {}
+        
+        # Сначала соберем все уникальные устройства
+        for device_type, devices in self.devices.items():
+            for device in devices:
+                key = (device.get("subnet_id"), device.get("device_id"))
+                unique_devices[key] = device.get("device_type", 0xFFFF)
+        
+        # Теперь выведем информацию о каждом уникальном устройстве
+        for (subnet_id, device_id), device_type in sorted(unique_devices.items()):
+            model = self._get_model_by_type(device_type)
+            _LOGGER.info(f"Устройство {subnet_id}.{device_id} - Тип: 0x{device_type:04X} - Модель: {model}")
+        
+        _LOGGER.info("=" * 50)
+        
+        # Вывод информации о неизвестных типах устройств
+        if self.unknown_device_types:
+            _LOGGER.info("НЕИЗВЕСТНЫЕ ТИПЫ УСТРОЙСТВ:")
+            for device_type in sorted(self.unknown_device_types):
+                _LOGGER.info(f"Тип: 0x{device_type:04X} - Добавьте эту информацию разработчику")
+            _LOGGER.info("=" * 50)
+        
         for device_type, devices in self.devices.items():
             if devices:
                 _LOGGER.info(f"- {device_type}: {len(devices)}")
@@ -342,6 +373,8 @@ class BusproDiscovery:
             0x0100: "HDL-MPTL14.46",      # Сенсорный экран Granite
             0x01CC: "HDL-MPTLC43.46",     # Сенсорный экран Granite Classic 4.3"
             0x01CD: "HDL-MPTLC70.46",     # Сенсорный экран Granite Classic 7"
+            0x0112: "HDL-MPTLX.46",       # Сенсорный экран Granite X-серия
+            0x010D: "HDL-MPTLPro.46",     # Сенсорный экран Granite Pro-серия
             0x03E8: "HDL-MPTL4.3.47",     # Сенсорный экран Granite Display 4.3"
             0x03E9: "HDL-MPTL7.47",       # Сенсорный экран Granite Display 7"
             
@@ -351,7 +384,7 @@ class BusproDiscovery:
             # Контроллеры климата
             0x0073: "HDL-MFHC01.431",     # Контроллер теплого пола
             0x0174: "HDL-MPWPID01.48",    # Модуль управления вентиляторами (фанкойлами)
-            0x0270: "HDL-MAC01.331",      # Модуль управления кондиционерами
+            0x0270: "HDL-MAC01.431",      # Модуль управления кондиционерами (Air Conditioner Module)
             0x0077: "HDL-DRY-4Z",         # Сухой контакт 4-зоны
             
             # Модули освещения
@@ -431,7 +464,7 @@ class BusproDiscovery:
             }
         
         # Сенсорные экраны Granite (0x0100)
-        elif device_type in [0x0100, 0x01CC, 0x01CD, 0x03E8, 0x03E9]:  # Все модели Granite
+        elif device_type in [0x0100, 0x01CC, 0x01CD, 0x0112, 0x010D, 0x03E8, 0x03E9]:  # Все модели Granite
             # Добавляем сенсор температуры для экрана Granite
             temp_device = {
                 "subnet_id": subnet_id,
@@ -495,12 +528,47 @@ class BusproDiscovery:
         elif device_type in [0x0180, 0x0182]:
             # Определяем количество каналов по типу устройства
             channels_map = {
-                0x0180: 2,  # MW02.431 - 2 канала
-                0x0182: 4,  # MW04.431 - 4 канала
+                0x0180: 1,  # MW02.431 - 1 роллета (канал 1 управляется через каналы 1.1 и 1.2)
+                0x0182: 4,  # MWM04.431 - 4 канала
             }
+            
+            # Специальная обработка для MW02.431
+            if device_type == 0x0180:
+                _LOGGER.info(f"Обнаружен модуль управления шторами MW02.431: {subnet_id}.{device_id}")
+                # Для MW02.431 канал 1 = каналы 1.1 и 1.2 (открыть/закрыть)
+                # Канал 2 = каналы 2.1 и 2.2 (открыть/закрыть)
+                for i in range(1, channels_map[device_type] + 1):
+                    cover_device = {
+                        "subnet_id": subnet_id,
+                        "device_id": device_id,
+                        "channel": i,
+                        "name": f"{name} {i}",
+                        "model": model,
+                        "open_channel": i * 2 - 1,  # 1 -> 1, 2 -> 3
+                        "close_channel": i * 2,     # 1 -> 2, 2 -> 4
+                    }
+                    self.devices[COVER].append(cover_device)
+                return {
+                    "category": COVER,
+                    "channels": channels_map.get(device_type, 1),
+                }
+
+            channels = channels_map.get(device_type, 1)
+            for i in range(1, channels + 1):
+                cover_device = {
+                    "subnet_id": subnet_id,
+                    "device_id": device_id,
+                    "channel": i,
+                    "name": f"{name} {i}",
+                    "model": model,
+                    "open_channel": i,
+                    "close_channel": i,
+                }
+                self.devices[COVER].append(cover_device)
+                
             return {
                 "category": COVER,
-                "channels": channels_map.get(device_type, 2),
+                "channels": channels,
             }
         
         # Модули управления системами отопления/охлаждения
@@ -509,7 +577,7 @@ class BusproDiscovery:
             channels_map = {
                 0x0073: 4,  # MFHC01.431 - до 4-х зон
                 0x0174: 1,  # MPWPID01.48 - 1 канал
-                0x0270: 1,  # MAC01.331 - 1 канал
+                0x0270: 1,  # MAC01.431 - 1 канал для управления кондиционером
                 0x0077: 4,  # DRY-4Z - 4 зоны (сухие контакты для климатического оборудования)
             }
             
@@ -523,6 +591,10 @@ class BusproDiscovery:
                 "type": "temperature",
             }
             self.devices[SENSOR].append(temp_device)
+            
+            # Специальная обработка для MAC01.431 - модуль кондиционирования
+            if device_type == 0x0270:
+                _LOGGER.info(f"Обнаружен модуль управления кондиционером MAC01.431: {subnet_id}.{device_id}")
             
             return {
                 "category": CLIMATE,
@@ -615,7 +687,9 @@ class BusproDiscovery:
         
         # Неизвестные типы устройств
         else:
-            _LOGGER.warning(f"Неизвестный тип устройства: 0x{device_type:04X}")
+            # Добавляем тип в множество неизвестных типов
+            self.unknown_device_types.add(device_type)
+            _LOGGER.warning(f"Неизвестный тип устройства: 0x{device_type:04X} (ID: {subnet_id}.{device_id})")
             return {
                 "category": BINARY_SENSOR,  # По умолчанию как бинарный сенсор
                 "channels": 1,

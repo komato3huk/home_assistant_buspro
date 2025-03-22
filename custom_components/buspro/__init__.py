@@ -23,7 +23,7 @@ from homeassistant.const import (
 from homeassistant.const import (
     EVENT_HOMEASSISTANT_STOP,
 )
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.helpers.typing import ConfigType
 from homeassistant.helpers.event import async_track_time_interval
@@ -92,6 +92,12 @@ SERVICE_BUSPRO_UNIVERSAL_SWITCH_SCHEMA = vol.Schema({
     vol.Required(SERVICE_BUSPRO_ATTR_ADDRESS): vol.Any([cv.positive_int]),
     vol.Required(SERVICE_BUSPRO_ATTR_SWITCH_NUMBER): vol.Any(cv.positive_int),
     vol.Required(SERVICE_BUSPRO_ATTR_STATUS): vol.Any(cv.positive_int),
+})
+
+# Схема для сервиса сканирования устройств
+SCAN_DEVICES_SCHEMA = vol.Schema({
+    vol.Optional("subnet_id"): vol.All(vol.Coerce(int), vol.Range(min=1, max=254)),
+    vol.Optional("timeout", default=5): vol.All(vol.Coerce(int), vol.Range(min=1, max=60)),
 })
 
 CONFIG_SCHEMA = vol.Schema(
@@ -193,6 +199,27 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Регистрируем функцию для выгрузки entry
     entry.async_on_unload(entry.add_update_listener(_update_listener))
+    
+    # Регистрируем сервис сканирования устройств
+    async def handle_scan_devices(call: ServiceCall) -> None:
+        """Обработчик сервиса сканирования устройств."""
+        subnet_id = call.data.get("subnet_id")
+        timeout = call.data.get("timeout", 5)
+        
+        _LOGGER.info(f"Запуск сканирования устройств Buspro (подсеть: {subnet_id or 'все'}, таймаут: {timeout}с)")
+        
+        try:
+            await discovery.discover_devices(subnet_id=subnet_id, timeout=timeout)
+            _LOGGER.info("Сканирование устройств Buspro завершено")
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при сканировании устройств Buspro: {e}")
+    
+    hass.services.async_register(
+        DOMAIN,
+        "scan_devices",
+        handle_scan_devices,
+        schema=SCAN_DEVICES_SCHEMA,
+    )
     
     return True
 

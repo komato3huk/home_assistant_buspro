@@ -55,10 +55,13 @@ async def async_setup_entry(
             device_id = device.get("device_id")
             channel = device.get("channel")
             name = device.get("name")
+            open_channel = device.get("open_channel")
+            close_channel = device.get("close_channel")
             
-            _LOGGER.info(f"Добавление штор: {name} ({subnet_id}.{device_id}.{channel})")
+            _LOGGER.info(f"Добавление штор: {name} ({subnet_id}.{device_id}.{channel}, "
+                        f"open={open_channel}, close={close_channel})")
             entities.append(
-                BusproCover(gateway, subnet_id, device_id, channel, name)
+                BusproCover(gateway, subnet_id, device_id, channel, name, open_channel, close_channel)
             )
     
     if entities:
@@ -119,6 +122,8 @@ class BusproCover(CoverEntity):
         device_id: int,
         channel: int,
         name: str,
+        open_channel: int,
+        close_channel: int,
     ):
         """Инициализация шторы."""
         self._gateway = gateway
@@ -126,6 +131,8 @@ class BusproCover(CoverEntity):
         self._device_id = device_id
         self._channel = channel
         self._name = name
+        self._open_channel = open_channel
+        self._close_channel = close_channel
         
         # Состояние шторы
         self._position = 0  # 0 - закрыто полностью, 100 - открыто полностью
@@ -146,6 +153,9 @@ class BusproCover(CoverEntity):
         
         # Установка типа устройства
         self._attr_device_class = CoverDeviceClass.CURTAIN
+        
+        _LOGGER.info(f"Инициализация шторы {name} (ID: {self._unique_id}), "
+                    f"каналы: открытие={self._open_channel}, закрытие={self._close_channel}")
         
     @property
     def name(self) -> str:
@@ -184,13 +194,13 @@ class BusproCover(CoverEntity):
         
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Открытие шторы."""
-        _LOGGER.info(f"Открытие шторы {self._name} ({self._subnet_id}.{self._device_id}.{self._channel})")
+        _LOGGER.info(f"Открытие шторы {self._name} ({self._subnet_id}.{self._device_id}.{self._open_channel})")
         
         # Используем код OPERATION_CURTAIN_SWITCH для управления шторами
         operation_code = OPERATION_CURTAIN_SWITCH
         
         # Формируем команду: [channel, command]
-        data = [self._channel, CURTAIN_CMD_UP]
+        data = [self._open_channel, CURTAIN_CMD_UP]
         
         try:
             # Отправляем команду через шлюз
@@ -210,13 +220,13 @@ class BusproCover(CoverEntity):
         
     async def async_close_cover(self, **kwargs: Any) -> None:
         """Закрытие шторы."""
-        _LOGGER.info(f"Закрытие шторы {self._name} ({self._subnet_id}.{self._device_id}.{self._channel})")
+        _LOGGER.info(f"Закрытие шторы {self._name} ({self._subnet_id}.{self._device_id}.{self._close_channel})")
         
         # Используем код OPERATION_CURTAIN_SWITCH для управления шторами
         operation_code = OPERATION_CURTAIN_SWITCH
         
         # Формируем команду: [channel, command]
-        data = [self._channel, CURTAIN_CMD_DOWN]
+        data = [self._close_channel, CURTAIN_CMD_DOWN]
         
         try:
             # Отправляем команду через шлюз
@@ -236,13 +246,13 @@ class BusproCover(CoverEntity):
         
     async def async_stop_cover(self, **kwargs: Any) -> None:
         """Остановка шторы."""
-        _LOGGER.info(f"Остановка шторы {self._name} ({self._subnet_id}.{self._device_id}.{self._channel})")
+        _LOGGER.info(f"Остановка шторы {self._name} ({self._subnet_id}.{self._device_id}.{self._open_channel})")
         
         # Используем код OPERATION_CURTAIN_SWITCH для управления шторами
         operation_code = OPERATION_CURTAIN_SWITCH
         
         # Формируем команду: [channel, command]
-        data = [self._channel, CURTAIN_CMD_STOP]
+        data = [self._open_channel, CURTAIN_CMD_STOP]
         
         try:
             # Отправляем команду через шлюз
