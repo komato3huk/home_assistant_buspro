@@ -1,15 +1,17 @@
 {
   "domain": "buspro",
   "name": "HDL Buspro",
-  "config_flow": true,
-  "documentation": "https://github.com/eyesoft/home_assistant_buspro",
-  "issue_tracker": "https://github.com/eyesoft/home_assistant_buspro/issues",
-  "codeowners": ["@eyesoft"],
+  "version": "1.0.0",
+  "documentation": "https://github.com/yourusername/home_assistant_buspro",
+  "issue_tracker": "https://github.com/yourusername/home_assistant_buspro/issues",
   "dependencies": [],
+  "codeowners": ["@yourusername"],
   "requirements": [],
-  "ssdp": [],
-  "zeroconf": [],
+  "config_flow": true,
+  "iot_class": "local_push",
+  "loggers": ["custom_components.buspro"],
   "homekit": {},
-  "version": "1.6.0",
-  "iot_class": "local_polling"
+  "zeroconf": {},
+  "ssdp": {},
+  "dhcp": {}
 }

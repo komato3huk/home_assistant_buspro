@@ -1,4 +1,5 @@
-from enum import Enum
+"""Enums for HDL Buspro protocol."""
+from enum import Enum, auto
 
 
 class SuccessOrFailure(Enum):
@@ -7,6 +8,13 @@ class SuccessOrFailure(Enum):
 
 
 class DeviceType(Enum):
+    """HDL Buspro device types."""
+    
+    LIGHT = 0x0001
+    SWITCH = 0x0002
+    COVER = 0x0003
+    CLIMATE = 0x0004
+    SENSOR = 0x0005
     NotSet = b'\x00\x00'
     SB_DN_6B0_10v = b'\x00\x11'   # Rele varme
     SB_DN_SEC250K = b'\x0B\xE9'   # Sikkerhetsmodul
@@ -41,6 +49,8 @@ class SwitchStatusOnOff(Enum):
 
 
 class OnOffStatus(Enum):
+    """On/Off status enum."""
+    
     OFF = 0
     ON = 1
 
@@ -58,7 +68,16 @@ class TemperatureMode(Enum):
     Timer = 5
 
 
-class OperateCode(Enum):
+class OperateCode:
+    """HDL Buspro operation codes."""
+    
+    SINGLE_CHANNEL = 0x0031
+    READ_STATUS = 0x0032
+    SCENE_CONTROL = 0x0002
+    UNIVERSAL_SWITCH = 0x0003
+    TIME_IF_FROM_LOGIC_OR_SECURITY = 0x000E
+    DISCOVERY = 0x000D
+
     NotSet = b'\x00'
 
     SingleChannelControl = b'\x00\x31'
@@ -107,10 +126,6 @@ class OperateCode(Enum):
     # Scene = b'\x00\x02'
     # Response_Scene = b'\x00\x03'
 
-    TIME_IF_FROM_LOGIC_OR_SECURITY = b'\xDA\x44'
-
-    # b'\x1947'
-    # INFO_IF_FROM_12in1__1 = b'\x16\x47'
     INFO_IF_FROM_RELE_10V = b'\xEF\xFF'
     # b'\xF036'
 
@@ -289,31 +304,10 @@ class OperateCode(Enum):
     WriteRemarkOfLogicResponse = 0xD989,
     ReadRemarkOfLogic = 0xD986,
     ReadRemarkOfLogicResponse = 0xD987,
-    UniversalSwitchControl = 0xE01C,
-    UniversalSwitchControlResponse = 0xE01D,
     BroadcastSystemDateTime = 0xDA44,
     
     ReadAcCurrentStatus = 0xE0EC,
     ReadAcCurrentStatusResponse = 0xE0ED,
-    
-    ReadFloorHeatingStatus = 0x1944,
-    ReadFloorHeatingStatusResponse = 0x1945,
-    
-    ReadStatusPir = 0x1645,
-    ReadStatusPirResponse = 0x1646,
-    
-    BroadcastTemperature = 0xE3E5,
-    
-    ReadTemperature = 0xE3E7,
-    ReadTemperatureResponse = 0xE3E8,
-    
-    BroadcastSensorsStatus = 0x1647,
-    
-    ReadFloorHeatingSettings = 0x1940,
-    ReadFloorHeatingSettingsResponse = 0x1941,
-    
-    ControlFloorHeatingStatus = 0x1946,
-    ControlFloorHeatingStatusResponse = 0x1947,
     
     BroadcastStatusOfSequence = 0xF036,
     

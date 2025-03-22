@@ -1,3 +1,5 @@
+"""Telegram helper for HDL Buspro protocol."""
+from typing import Dict, Any, Tuple
 import traceback
 from struct import *
 
@@ -8,54 +10,37 @@ from ..devices.control import *
 
 
 class TelegramHelper:
-
-    def build_telegram_from_udp_data(self, data, address):
-        if not data:
-            print("build_telegram_from_udp_data: not data")
-            return None
-
-        try:
-            index_length_of_data_package = 16
-            index_original_subnet_id = 17
-            index_original_device_id = 18
-            index_original_device_type = 19
-            index_operate_code = 21
-            index_target_subnet_id = 23
-            index_target_device_id = 24
-            index_content = 25
-            length_of_data_package = data[index_length_of_data_package]
-
-            source_device_id = data[index_original_device_id]
-            content_length = length_of_data_package - 1 - 1 - 1 - 2 - 2 - 1 - 1 - 1 - 1
-            source_subnet_id = data[index_original_subnet_id]
-            source_device_type_hex = data[index_original_device_type:index_original_device_type + 2]
-            operate_code_hex = data[index_operate_code:index_operate_code + 2]
-            target_subnet_id = data[index_target_subnet_id]
-            target_device_id = data[index_target_device_id]
-            content = data[index_content:index_content + content_length]
-            crc = data[-2:]
-
-            generics = Generics()
-
-            telegram = Telegram()
-            telegram.source_device_type = generics.get_enum_value(DeviceType, source_device_type_hex)
-            telegram.udp_data = data
-            telegram.source_address = (source_subnet_id, source_device_id)
-            telegram.operate_code = generics.get_enum_value(OperateCode, operate_code_hex)
-            telegram.target_address = (target_subnet_id, target_device_id)
-            telegram.udp_address = address
-            telegram.payload = generics.hex_to_integer_list(content)
-            telegram.crc = crc
-
-            crc_check_pass = self._check_crc(telegram)
-            if not crc_check_pass:
-                print("crc check failed")
-                return None
-
-            return telegram
-        except Exception as e:
-            print("error building telegram: {}".format(traceback.format_exc()))
-            return None
+    """Helper class for HDL Buspro telegrams."""
+    
+    def build_telegram_from_udp_data(self, data: bytes, address: Tuple[str, int]) -> Dict[str, Any]:
+        """Build telegram dictionary from UDP data."""
+        # Basic validation
+        if not data or len(data) < 7:
+            return {}
+            
+        # Check header
+        if data[0] != 0xAA or data[1] != 0xAA:
+            return {}
+            
+        # Parse header
+        subnet_id = data[2]
+        device_id = data[3]
+        operate_code = (data[4] << 8) | data[5]
+        data_length = data[6]
+        
+        # Parse data
+        payload = list(data[7:7+data_length]) if data_length > 0 else []
+        
+        # Create telegram
+        telegram = {
+            "source_address": address,
+            "subnet_id": subnet_id,
+            "device_id": device_id,
+            "operate_code": operate_code,
+            "data": payload
+        }
+        
+        return telegram
 
     @staticmethod
     def replace_none_values(telegram: Telegram):
@@ -70,7 +55,42 @@ class TelegramHelper:
         return telegram
 
     # noinspection SpellCheckingInspection
-    def build_send_buffer(self, telegram: Telegram):
+    def build_send_buffer(self, telegram):
+        """Build buffer from telegram for sending."""
+        # If the telegram is a dictionary (legacy format), convert to bytes
+        if isinstance(telegram, dict):
+            subnet_id = telegram.get("subnet_id", 0)
+            device_id = telegram.get("device_id", 0)
+            operate_code = telegram.get("operate_code", 0)
+            data = telegram.get("data", [])
+            
+            # Build packet
+            packet = bytearray()
+            
+            # Header
+            packet.extend([0xAA, 0xAA])
+            
+            # Address
+            packet.append(subnet_id)
+            packet.append(device_id)
+            
+            # Operation code (2 bytes)
+            packet.append((operate_code >> 8) & 0xFF)
+            packet.append(operate_code & 0xFF)
+            
+            # Data length
+            packet.append(len(data))
+            
+            # Data
+            packet.extend(data)
+            
+            # CRC (simple sum of all bytes)
+            crc = sum(packet) & 0xFF
+            packet.append(crc)
+            
+            return bytes(packet)
+            
+        # Handle Telegram object (newer format)
         send_buf = bytearray([192, 168, 1, 15])
         # noinspection SpellCheckingInspection
         send_buf.extend('HDLMIRACLE'.encode())
@@ -103,14 +123,6 @@ class TelegramHelper:
             send_buf.append(0)
             send_buf.append(0)
 
-        # if telegram.source_device_type_hex is not None:
-        #    send_buf.append(telegram.source_device_type_hex[0])
-        #    send_buf.append(telegram.source_device_type_hex[1])
-        # else:
-        #     send_buf.append(0)
-        #    send_buf.append(0)
-        #    # send_buf.append(b'\x00\x00')
-
         operate_code_hex = telegram.operate_code.value
         send_buf.append(operate_code_hex[0])
         send_buf.append(operate_code_hex[1])
@@ -121,14 +133,6 @@ class TelegramHelper:
 
         for byte in telegram.payload:
             send_buf.append(byte)
-
-        # crc_buf_length = length_of_data_package - 2
-        # crc_buf = send_buf[-crc_buf_length:]
-        # crc_buf_as_bytes = bytes(crc_buf)
-        # crc = self._crc16(crc_buf_as_bytes)
-        # hex_byte_array = pack(">H", crc)
-        # send_buf.append(hex_byte_array[0])
-        # send_buf.append(hex_byte_array[1])
 
         crc_0, crc_1 = self._calculate_crc(length_of_data_package, send_buf)
         send_buf.append(crc_0)

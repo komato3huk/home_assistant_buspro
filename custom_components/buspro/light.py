@@ -6,6 +6,7 @@ https://home-assistant.io/components/...
 """
 
 import logging
+from typing import Any, Dict, Optional
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
@@ -13,12 +14,18 @@ from homeassistant.components.light import (
     LightEntity, 
     ColorMode, 
     PLATFORM_SCHEMA, 
-    ATTR_BRIGHTNESS
+    ATTR_BRIGHTNESS,
+    SUPPORT_BRIGHTNESS
 )
 from homeassistant.const import (CONF_NAME, CONF_DEVICES)
 from homeassistant.core import callback
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.core import HomeAssistant
+from homeassistant.helpers.entity import Entity
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
 
 from ..buspro import DATA_BUSPRO
+from .const import DOMAIN
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -38,46 +45,43 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
 })
 
 
-# noinspection PyUnusedLocal
-async def async_setup_platform(hass, config, async_add_entites, discovery_info=None):
-    """Set up Buspro light devices."""
-    # noinspection PyUnresolvedReferences
-    from .pybuspro.devices import Light
-
-    hdl = hass.data[DATA_BUSPRO].hdl
-    devices = []
-    platform_running_time = int(config["running_time"])
-
-    for address, device_config in config[CONF_DEVICES].items():
-        name = device_config[CONF_NAME]
-        device_running_time = int(device_config["running_time"])
-        dimmable = bool(device_config["dimmable"])
-
-        if device_running_time == 0:
-            device_running_time = platform_running_time
-        if dimmable:
-            device_running_time = 0
-
-        address2 = address.split('.')
-        device_address = (int(address2[0]), int(address2[1]))
-        channel_number = int(address2[2])
-        _LOGGER.debug("Adding light '{}' with address {} and channel number {}".format(name, device_address, channel_number))
-
-        light = Light(hdl, device_address, channel_number, name)
-        devices.append(BusproLight(hass, light, device_running_time, dimmable))
-
-    async_add_entites(devices)
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up the HDL Buspro light platform."""
+    gateway = hass.data[DOMAIN][config_entry.entry_id]["gateway"]
+    devices = hass.data[DOMAIN][config_entry.entry_id]["devices"]
+    
+    entities = []
+    
+    # Add all discovered light devices
+    for device in devices.get("light", []):
+        entities.append(
+            BusproLight(
+                gateway,
+                device["subnet_id"],
+                device["device_id"],
+                device["name"],
+            )
+        )
+    
+    async_add_entities(entities)
 
 
 # noinspection PyAbstractClass
 class BusproLight(LightEntity):
-    """Representation of a Buspro light."""
+    """Representation of a HDL Buspro Light."""
 
-    def __init__(self, hass, device, running_time, dimmable):
-        self._hass = hass
-        self._device = device
-        self._running_time = running_time
-        self._dimmable = dimmable
+    def __init__(self, gateway, subnet_id: int, device_id: int, name: str):
+        """Initialize the light."""
+        self._gateway = gateway
+        self._subnet_id = subnet_id
+        self._device_id = device_id
+        self._name = name
+        self._state = None
+        self._brightness = None
         self._attr_color_mode = ColorMode.BRIGHTNESS
         self._attr_supported_color_modes = {ColorMode.BRIGHTNESS}
         self.async_register_callbacks()
@@ -91,7 +95,7 @@ class BusproLight(LightEntity):
             """Call after device was updated."""
             self.async_write_ha_state()
 
-        self._device.register_device_updated_cb(after_update_callback)
+        self._gateway.register_device_updated_cb(after_update_callback)
 
     @property
     def should_poll(self):
@@ -99,40 +103,74 @@ class BusproLight(LightEntity):
         return False
 
     @property
-    def name(self):
+    def name(self) -> str:
         """Return the display name of this light."""
-        return self._device.name
+        return self._name
 
     @property
     def available(self):
         """Return True if entity is available."""
-        return self._hass.data[DATA_BUSPRO].connected
+        return self._gateway.connected
 
     @property
-    def brightness(self):
+    def brightness(self) -> Optional[int]:
         """Return the brightness of the light."""
-        brightness = self._device.current_brightness / 100 * 255
-        return brightness
+        return self._brightness
 
     @property
-    def is_on(self):
+    def is_on(self) -> bool:
         """Return true if light is on."""
-        return self._device.is_on
+        return self._state
 
-    async def async_turn_on(self, **kwargs):
-        """Instruct the light to turn on."""
-        brightness = int(kwargs.get(ATTR_BRIGHTNESS, 255) / 255 * 100)
+    @property
+    def supported_features(self) -> int:
+        """Flag supported features."""
+        return SUPPORT_BRIGHTNESS
 
-        if not self.is_on and self._device.previous_brightness is not None and brightness == 100:
-            brightness = self._device.previous_brightness
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Turn the light on."""
+        brightness = kwargs.get(ATTR_BRIGHTNESS, 255)
+        
+        # Convert Home Assistant brightness (0-255) to HDL brightness (0-100)
+        hdl_brightness = int(brightness * 100 / 255)
+        
+        await self._gateway.send_message(
+            [self._subnet_id, self._device_id],
+            [0x0031],  # Single channel control
+            [1, hdl_brightness]  # Channel 1, brightness value
+        )
+        
+        self._state = True
+        self._brightness = brightness
 
-        await self._device.set_brightness(brightness, self._running_time)
-
-    async def async_turn_off(self, **kwargs):
-        """Instruct the light to turn off."""
-        await self._device.set_off(self._running_time)
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn the light off."""
+        await self._gateway.send_message(
+            [self._subnet_id, self._device_id],
+            [0x0031],  # Single channel control
+            [1, 0]  # Channel 1, brightness 0
+        )
+        
+        self._state = False
+        self._brightness = 0
 
     @property
     def unique_id(self):
         """Return the unique id."""
-        return self._device.device_identifier
+        return f"{self._subnet_id}_{self._device_id}"
+
+    async def async_update(self) -> None:
+        """Fetch new state data for this light."""
+        try:
+            response = await self._gateway.send_message(
+                [self._subnet_id, self._device_id],
+                [0x0032],  # Read status
+                [1]  # Channel 1
+            )
+            
+            if response:
+                self._state = response[0] > 0
+                # Convert HDL brightness (0-100) to Home Assistant brightness (0-255)
+                self._brightness = int(response[0] * 255 / 100)
+        except Exception as err:
+            _LOGGER.error("Error updating light state: %s", err)

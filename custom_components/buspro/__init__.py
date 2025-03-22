@@ -6,6 +6,8 @@ https://home-assistant.io/...
 """
 
 import logging
+import asyncio
+from typing import Dict, List, Optional
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
@@ -13,6 +15,8 @@ from homeassistant.const import (
     CONF_HOST, 
     CONF_PORT, 
     CONF_NAME,
+    CONF_TIMEOUT,
+    Platform,
 )
 from homeassistant.const import (
     EVENT_HOMEASSISTANT_STOP,
@@ -20,11 +24,29 @@ from homeassistant.const import (
 from homeassistant.core import HomeAssistant
 from homeassistant.config_entries import ConfigEntry
 
+from .const import (
+    DOMAIN,
+    DEFAULT_PORT,
+    DEFAULT_TIMEOUT,
+    DEFAULT_POLL_INTERVAL,
+    DEFAULT_DEVICE_SUBNET_ID,
+    DEFAULT_DEVICE_ID,
+    CONF_DEVICE_SUBNET_ID,
+    CONF_DEVICE_ID,
+    CONF_POLL_INTERVAL,
+)
+from .discovery import BusproDiscovery
+from .gateway import BusproGateway
+from .pybuspro.core.hdl_device import HDLDevice
+
 _LOGGER = logging.getLogger(__name__)
 
-DOMAIN = "buspro"
-DATA_BUSPRO = "buspro"
-DEPENDENCIES = []
+PLATFORMS = [
+    Platform.LIGHT,
+    Platform.COVER,
+    Platform.CLIMATE,
+    Platform.SENSOR,
+]
 
 DEFAULT_CONF_NAME = ""
 
@@ -66,38 +88,117 @@ CONFIG_SCHEMA = vol.Schema({
     DOMAIN: vol.Schema({
         vol.Required(CONF_HOST): cv.string,
         vol.Required(CONF_PORT): cv.port,
-        vol.Optional(CONF_NAME, default=DEFAULT_CONF_NAME): cv.string
+        vol.Optional(CONF_NAME, default=DEFAULT_CONF_NAME): cv.string,
+        vol.Optional(CONF_TIMEOUT, default=DEFAULT_TIMEOUT): cv.positive_int,
+        vol.Optional(CONF_DEVICE_SUBNET_ID, default=DEFAULT_DEVICE_SUBNET_ID): cv.positive_int,
+        vol.Optional(CONF_DEVICE_ID, default=DEFAULT_DEVICE_ID): cv.positive_int,
+        vol.Optional(CONF_POLL_INTERVAL, default=DEFAULT_POLL_INTERVAL): cv.positive_int,
     })
 }, extra=vol.ALLOW_EXTRA)
 
-async def async_setup(hass: HomeAssistant, config: dict):
-    """Setup the Buspro component. """
-    if DOMAIN not in config:
-        return True
-
-    host = config[DOMAIN][CONF_HOST]
-    port = config[DOMAIN][CONF_PORT]
-
-    hass.data[DATA_BUSPRO] = BusproModule(hass, host, port)
-    await hass.data[DATA_BUSPRO].start()
-
-    hass.data[DATA_BUSPRO].register_services()
-
-    return True
-
-async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
-    """Setup the Buspro component. """
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """Set up the HDL Buspro component."""
     hass.data.setdefault(DOMAIN, {})
-
-    host = config_entry.data.get(CONF_HOST, "")
-    port = config_entry.data.get(CONF_PORT, 1)
-
-    hass.data[DOMAIN] = BusproModule(hass, host, port)
-    await hass.data[DOMAIN].start()
-
-    hass.data[DOMAIN].register_services()
-
     return True
+
+async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Set up HDL Buspro from a config entry."""
+    # Create HDL Buspro device
+    host = entry.data.get(CONF_HOST)
+    port = entry.data.get(CONF_PORT, DEFAULT_PORT)
+    timeout = entry.data.get(CONF_TIMEOUT, DEFAULT_TIMEOUT)
+    subnet_id = entry.data.get(CONF_DEVICE_SUBNET_ID, DEFAULT_DEVICE_SUBNET_ID)
+    device_id = entry.data.get(CONF_DEVICE_ID, DEFAULT_DEVICE_ID)
+    poll_interval = entry.data.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
+    
+    # Initialize options if they don't exist yet
+    if not entry.options:
+        options = {
+            CONF_TIMEOUT: timeout,
+            CONF_DEVICE_SUBNET_ID: subnet_id,
+            CONF_DEVICE_ID: device_id,
+            CONF_POLL_INTERVAL: poll_interval,
+        }
+        hass.config_entries.async_update_entry(entry, options=options)
+    else:
+        # Use values from options if set
+        timeout = entry.options.get(CONF_TIMEOUT, timeout)
+        subnet_id = entry.options.get(CONF_DEVICE_SUBNET_ID, subnet_id)
+        device_id = entry.options.get(CONF_DEVICE_ID, device_id)
+        poll_interval = entry.options.get(CONF_POLL_INTERVAL, poll_interval)
+    
+    _LOGGER.debug(
+        "Connecting to HDL Buspro gateway at %s:%s with device address %d.%d",
+        host, port, subnet_id, device_id
+    )
+    
+    # Create HDL device with source address
+    hdl_device = HDLDevice(
+        host, 
+        port, 
+        subnet_id=subnet_id, 
+        device_id=device_id,
+        timeout=timeout
+    )
+    
+    # Create discovery service
+    discovery = BusproDiscovery(hdl_device)
+    
+    # Create gateway
+    gateway = BusproGateway(hass, hdl_device, discovery, poll_interval)
+    
+    # Perform initial discovery
+    discovered_devices = await discovery.scan_network()
+    
+    # If no devices were discovered, log warning but continue
+    if not discovered_devices:
+        _LOGGER.warning("No HDL Buspro devices discovered")
+    else:
+        _LOGGER.info("Discovered %d HDL Buspro devices", len(discovered_devices))
+    
+    # Store data in hass
+    hass.data.setdefault(DOMAIN, {})
+    hass.data[DOMAIN][entry.entry_id] = {
+        "gateway": gateway,
+        "devices": discovered_devices,
+    }
+    
+    # Initialize gateway
+    await gateway.start()
+    
+    # Set up all platforms
+    hass.async_create_task(
+        hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    )
+    
+    # Register services
+    # TODO: Add services
+    
+    # Register update listener for options
+    entry.async_on_unload(entry.add_update_listener(async_update_options))
+    
+    return True
+
+async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Update options for the HDL Buspro integration."""
+    await hass.config_entries.async_reload(entry.entry_id)
+
+async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+    """Unload a config entry."""
+    # Get gateway instance
+    gateway = hass.data[DOMAIN][entry.entry_id]["gateway"]
+    
+    # Stop gateway
+    await gateway.stop()
+    
+    # Unload platforms
+    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
+    
+    # Remove config entry from hass
+    if unload_ok:
+        hass.data[DOMAIN].pop(entry.entry_id)
+        
+    return unload_ok
 
 class BusproModule:
     """Representation of Buspro Object."""
