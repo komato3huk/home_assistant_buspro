@@ -4,11 +4,8 @@ from typing import Any, Optional
 
 from homeassistant.components.cover import (
     CoverEntity,
+    CoverEntityFeature,
     ATTR_POSITION,
-    SUPPORT_CLOSE,
-    SUPPORT_OPEN,
-    SUPPORT_SET_POSITION,
-    SUPPORT_STOP,
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
@@ -55,6 +52,12 @@ class BusproCover(CoverEntity):
         self._is_closing = None
         self._is_opening = None
         self._available = True
+        self._attr_supported_features = (
+            CoverEntityFeature.OPEN 
+            | CoverEntityFeature.CLOSE 
+            | CoverEntityFeature.STOP 
+            | CoverEntityFeature.SET_POSITION
+        )
 
     @property
     def name(self) -> str:
@@ -89,11 +92,6 @@ class BusproCover(CoverEntity):
     def is_opening(self) -> Optional[bool]:
         """Return if the cover is opening or not."""
         return self._is_opening
-
-    @property
-    def supported_features(self) -> int:
-        """Flag supported features."""
-        return SUPPORT_OPEN | SUPPORT_CLOSE | SUPPORT_STOP | SUPPORT_SET_POSITION
 
     async def async_open_cover(self, **kwargs: Any) -> None:
         """Open the cover."""

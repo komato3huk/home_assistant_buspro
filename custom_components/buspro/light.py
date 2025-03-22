@@ -15,7 +15,7 @@ from homeassistant.components.light import (
     ColorMode, 
     PLATFORM_SCHEMA, 
     ATTR_BRIGHTNESS,
-    SUPPORT_BRIGHTNESS
+    LightEntityFeature
 )
 from homeassistant.const import (CONF_NAME, CONF_DEVICES)
 from homeassistant.core import callback
@@ -124,7 +124,7 @@ class BusproLight(LightEntity):
     @property
     def supported_features(self) -> int:
         """Flag supported features."""
-        return SUPPORT_BRIGHTNESS
+        return LightEntityFeature.BRIGHTNESS
 
     async def async_turn_on(self, **kwargs: Any) -> None:
         """Turn the light on."""
