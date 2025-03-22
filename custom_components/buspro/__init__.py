@@ -42,8 +42,9 @@ from .const import (
     CONF_GATEWAY_PORT,
     DEFAULT_GATEWAY_HOST,
     DEFAULT_GATEWAY_PORT,
+    DEFAULT_HOST,
 )
-from .discovery import BusproDiscovery
+from .discovery import BusproDiscovery, DeviceDiscovery
 from .gateway import BusproGateway
 
 _LOGGER = logging.getLogger(__name__)
@@ -186,9 +187,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     }
     
     # Регистрируем платформы
-    await hass.config_entries.async_forward_entry_setups(
-        entry, ["light", "switch", "cover", "climate", "sensor", "binary_sensor"]
-    )
+    # Возвращаем платформу cover в список загружаемых компонентов
+    platforms = ["light", "switch", "cover", "climate", "sensor", "binary_sensor"]
+    await hass.config_entries.async_forward_entry_setups(entry, platforms)
     
     # Регистрируем функцию для выгрузки entry
     entry.async_on_unload(entry.add_update_listener(_update_listener))

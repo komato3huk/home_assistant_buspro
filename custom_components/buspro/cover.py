@@ -15,7 +15,6 @@ from homeassistant.components.cover import (
     CoverDeviceClass,
     CoverEntity,
     CoverEntityFeature,
-    PLATFORM_SCHEMA,
 )
 from homeassistant.const import CONF_NAME, CONF_DEVICES
 from homeassistant.core import HomeAssistant, callback
@@ -27,7 +26,8 @@ from .const import DOMAIN, OPERATION_CURTAIN_SWITCH, OPERATION_READ_STATUS, COVE
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
+# Схема для платформы
+CONFIG_SCHEMA = vol.Schema({
     vol.Required(CONF_DEVICES): {cv.string: cv.string},
 })
 
