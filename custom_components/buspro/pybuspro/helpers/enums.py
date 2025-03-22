@@ -3,8 +3,8 @@ from enum import Enum, IntEnum
 
 
 class SuccessOrFailure(Enum):
-    Success = b'\xF8'
-    Failure = b'\xF5'
+    Success = 0xF8
+    Failure = 0xF5
 
 
 class DeviceType(IntEnum):
@@ -20,24 +20,24 @@ class DeviceType(IntEnum):
     GRANITE = 0x0100
     LIGHT = 0x0001
     SWITCH = 0x0002
-    SB_DN_6B0_10v = b'\x00\x11'   # Rele varme
-    SB_DN_SEC250K = b'\x0B\xE9'   # Sikkerhetsmodul
-    SB_CMS_12in1 = b'\x01\x34'    # 12i1
-    SB_DN_Logic960 = b'\x04\x53'  # Logikkmodul
-    SB_DLP2 = b'\x00\x86'         # DLP
-    SB_DLP_v2 = b'\x00\x9C'       # DLPv2
-    PyBusPro = b'\xFF\xFC'
-    SmartHDLTest = b'\xFF\xFD'
-    SetupTool = b'\xFF\xFE'
-    SB_WS8M = b'\x01\x2B'         # 8 keys panel
-    SB_CMS_8in1 = b'\x01\x35'     # 8i1
-    SB_DN_DT0601 = b'\x02\x60'    # 6ch Dimmer
-    HDL_MDT0601 = b'\x02\x6D'     # 6ch Dimmer ny type
-    SB_DN_R0816 = b'\x01\xAC'     # Rele
-    SB_DRY_4Z = b'\x00\x77'       # Dry contact
-    HDL_MSP07M = b'\x01\x50'      # Sensors in One
+    SB_DN_6B0_10v = 0x0011   # Rele varme
+    SB_DN_SEC250K = 0x0BE9   # Sikkerhetsmodul
+    SB_CMS_12in1 = 0x0134    # 12i1
+    SB_DN_Logic960 = 0x0453  # Logikkmodul
+    SB_DLP2 = 0x0086         # DLP
+    SB_DLP_v2 = 0x009C       # DLPv2
+    PyBusPro = 0xFFFC
+    SmartHDLTest = 0xFFFD
+    SetupTool = 0xFFFE
+    SB_WS8M = 0x012B         # 8 keys panel
+    SB_CMS_8in1 = 0x0135     # 8i1
+    SB_DN_DT0601 = 0x0260    # 6ch Dimmer
+    HDL_MDT0601 = 0x026D     # 6ch Dimmer ny type
+    SB_DN_R0816 = 0x01AC     # Rele
+    SB_DRY_4Z = 0x0077       # Dry contact
+    HDL_MSP07M = 0x0150      # Sensors in One
 
-    # SB_DN_DT0601 = b'\x00\x9E'    # Universaldimmer 6ch 1A
+    # SB_DN_DT0601 = 0x009E    # Universaldimmer 6ch 1A
     # SB_DN_RS232N				    # RS232
 
 
@@ -90,38 +90,38 @@ class OperateCode:
     # Response codes
     DISCOVERY_RESPONSE = 0x0FA3
 
-    NotSet = b'\x00'
+    NotSet = 0x0000
 
-    SingleChannelControl = b'\x00\x31'
-    SingleChannelControlResponse = b'\x00\x32'
-    ReadStatusOfChannels = b'\x00\x33'
-    ReadStatusOfChannelsResponse = b'\x00\x34'
-    SceneControl = b'\x00\x02'
-    SceneControlResponse = b'\x00\x03'
-    UniversalSwitchControl = b'\xE0\x1C'
-    UniversalSwitchControlResponse = b'\xE0\x1D'
+    SingleChannelControl = 0x0031
+    SingleChannelControlResponse = 0x0032
+    ReadStatusOfChannels = 0x0033
+    ReadStatusOfChannelsResponse = 0x0034
+    SceneControl = 0x0002
+    SceneControlResponse = 0x0003
+    UniversalSwitchControl = 0xE01C
+    UniversalSwitchControlResponse = 0xE01D
 
-    ReadStatusOfUniversalSwitch = b'\xE0\x18'
-    ReadStatusOfUniversalSwitchResponse = b'\xE0\x19'
-    BroadcastStatusOfUniversalSwitch = b'\xE0\x17'
+    ReadStatusOfUniversalSwitch = 0xE018
+    ReadStatusOfUniversalSwitchResponse = 0xE019
+    BroadcastStatusOfUniversalSwitch = 0xE017
 
-    BroadcastSensorStatusResponse = b'\x16\x44'
-    ReadSensorStatus = b'\x16\x45'
-    ReadSensorStatusResponse = b'\x16\x46'
-    BroadcastSensorStatusAutoResponse = b'\x16\x47'
+    BroadcastSensorStatusResponse = 0x1644
+    ReadSensorStatus = 0x1645
+    ReadSensorStatusResponse = 0x1646
+    BroadcastSensorStatusAutoResponse = 0x1647
 
-    BroadcastTemperatureResponse = b'\xE3\xE5'
+    BroadcastTemperatureResponse = 0xE3E5
 
-    ReadFloorHeatingStatus = b'\x19\x44'
-    ReadFloorHeatingStatusResponse = b'\x19\x45'
-    ControlFloorHeatingStatus = b'\x19\x46'
-    ControlFloorHeatingStatusResponse = b'\x19\x47'
+    ReadFloorHeatingStatus = 0x1944
+    ReadFloorHeatingStatusResponse = 0x1945
+    ControlFloorHeatingStatus = 0x1946
+    ControlFloorHeatingStatusResponse = 0x1947
 
-    ReadDryContactStatus = b'\x15\xCE'
-    ReadDryContactStatusResponse = b'\x15\xCF'
+    ReadDryContactStatus = 0x15CE
+    ReadDryContactStatusResponse = 0x15CF
 
-    ReadSensorsInOneStatus = b'\x16\x04'
-    ReadSensorsInOneStatusResponse = b'\x16\x05'
+    ReadSensorsInOneStatus = 0x1604
+    ReadSensorsInOneStatusResponse = 0x1605
 
     """
     # 
@@ -135,42 +135,42 @@ class OperateCode:
     # 
     """
 
-    # Scene = b'\x00\x02'
-    # Response_Scene = b'\x00\x03'
+    # Scene = 0x0002
+    # Response_Scene = 0x0003
 
-    INFO_IF_FROM_RELE_10V = b'\xEF\xFF'
-    # b'\xF036'
+    INFO_IF_FROM_RELE_10V = 0xEFFF
+    # 0xF036
 
-    QUERY_DLP_FROM_SETUP_TOOL_1 = b'\xE0\xE4'  # Ingen data sendes svar sendes sender
-    RESPONSE_QUERY_DLP_FROM_SETUP_TOOL_1 = b'\xE0\xE5'
-    QUERY_DLP_FROM_SETUP_TOOL_2 = b'\x19\x44'  # Ingen data sendes svar sendes sender			FLOOR HEATING WORKING STATUS
-    RESPONSE_QUERY_DLP_FROM_SETUP_TOOL_2 = b'\x19\x45'
-    QUERY_DLP_FROM_SETUP_TOOL_3 = b'\x19\x40'  # Ingen data sendes svar sendes sender			FLOOR HEATING
-    RESPONSE_QUERY_DLP_FROM_SETUP_TOOL_3 = b'\x19\x41'
-    QUERY_DLP_FROM_SETUP_TOOL_4 = b'\x19\x46'  # 0 1 1 23 20 20 20										FLOOR HEATING WORKING STATUS CONTROL
-    RESPONSE_QUERY_DLP_FROM_SETUP_TOOL_4 = b'\x19\x47'
-    # b'\x19\x48' Temperature request?
-    # b'\x19\x49' Temperature request?
-    # b'\xE3\xE5' GPRS control answer back
+    QUERY_DLP_FROM_SETUP_TOOL_1 = 0xE0E4  # Ingen data sendes svar sendes sender
+    RESPONSE_QUERY_DLP_FROM_SETUP_TOOL_1 = 0xE0E5
+    QUERY_DLP_FROM_SETUP_TOOL_2 = 0x1944  # Ingen data sendes svar sendes sender			FLOOR HEATING WORKING STATUS
+    RESPONSE_QUERY_DLP_FROM_SETUP_TOOL_2 = 0x1945
+    QUERY_DLP_FROM_SETUP_TOOL_3 = 0x1940  # Ingen data sendes svar sendes sender			FLOOR HEATING
+    RESPONSE_QUERY_DLP_FROM_SETUP_TOOL_3 = 0x1941
+    QUERY_DLP_FROM_SETUP_TOOL_4 = 0x1946  # 0 1 1 23 20 20 20										FLOOR HEATING WORKING STATUS CONTROL
+    RESPONSE_QUERY_DLP_FROM_SETUP_TOOL_4 = 0x1947
+    # 0x1948 Temperature request?
+    # 0x1949 Temperature request?
+    # 0xE3E5 GPRS control answer back
 
-    QUERY_12in1_FROM_SETUP_TOOL_1 = b'\x00\x0E'
-    RESPONSE_QUERY_12in1_FROM_SETUP_TOOL_1 = b'\x00\x0F'
-    QUERY_12in1_FROM_SETUP_TOOL_2 = b'\xF0\x03'
-    RESPONSE_QUERY_12in1_FROM_SETUP_TOOL_2 = b'\xF0\x04'
-    QUERY_12in1_FROM_SETUP_TOOL_3 = b'\xDB\x3E'
-    RESPONSE_QUERY_12in1_FROM_SETUP_TOOL_3 = b'\xDB\x3F'
-    QUERY_12in1_FROM_SETUP_TOOL_4 = b'\x16\x66'
-    RESPONSE_QUERY_12in1_FROM_SETUP_TOOL_4 = b'\x16\x67'
-    QUERY_12in1_FROM_SETUP_TOOL_5 = b'\x16\x45'
-    RESPONSE_QUERY_12in1_FROM_SETUP_TOOL_5 = b'\x16\x46'
-    QUERY_12in1_FROM_SETUP_TOOL_6 = b'\x16\x5E'
-    RESPONSE_QUERY_12in1_FROM_SETUP_TOOL_6 = b'\x16\x5F'
-    QUERY_12in1_FROM_SETUP_TOOL_7 = b'\x16\x41'
-    RESPONSE_QUERY_12in1_FROM_SETUP_TOOL_7 = b'\x16\x42'
-    QUERY_12in1_FROM_SETUP_TOOL_8 = b'\x16\x6E'
-    RESPONSE_QUERY_12in1_FROM_SETUP_TOOL_8 = b'\x16\x6F'
-    QUERY_12in1_FROM_SETUP_TOOL_9 = b'\x16\xA9'
-    RESPONSE_QUERY_12in1_FROM_SETUP_TOOL_9 = b'\x16\xAA'
+    QUERY_12in1_FROM_SETUP_TOOL_1 = 0x000E
+    RESPONSE_QUERY_12in1_FROM_SETUP_TOOL_1 = 0x000F
+    QUERY_12in1_FROM_SETUP_TOOL_2 = 0xF003
+    RESPONSE_QUERY_12in1_FROM_SETUP_TOOL_2 = 0xF004
+    QUERY_12in1_FROM_SETUP_TOOL_3 = 0xDB3E
+    RESPONSE_QUERY_12in1_FROM_SETUP_TOOL_3 = 0xDB3F
+    QUERY_12in1_FROM_SETUP_TOOL_4 = 0x1666
+    RESPONSE_QUERY_12in1_FROM_SETUP_TOOL_4 = 0x1667
+    QUERY_12in1_FROM_SETUP_TOOL_5 = 0x1645
+    RESPONSE_QUERY_12in1_FROM_SETUP_TOOL_5 = 0x1646
+    QUERY_12in1_FROM_SETUP_TOOL_6 = 0x165E
+    RESPONSE_QUERY_12in1_FROM_SETUP_TOOL_6 = 0x165F
+    QUERY_12in1_FROM_SETUP_TOOL_7 = 0x1641
+    RESPONSE_QUERY_12in1_FROM_SETUP_TOOL_7 = 0x1642
+    QUERY_12in1_FROM_SETUP_TOOL_8 = 0x166E
+    RESPONSE_QUERY_12in1_FROM_SETUP_TOOL_8 = 0x166F
+    QUERY_12in1_FROM_SETUP_TOOL_9 = 0x16A9
+    RESPONSE_QUERY_12in1_FROM_SETUP_TOOL_9 = 0x16AA
 
     '''
     public enum OperationCode
