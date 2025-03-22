@@ -1,9 +1,9 @@
 """HDL Buspro device discovery implementation."""
 import logging
 from typing import Dict, List, Optional
+import asyncio
 
-from .const import DOMAIN, OPERATION_READ_STATUS
-from .pybuspro.core.hdl_device import HDLDevice
+from .const import DOMAIN, OPERATION_READ_STATUS, OPERATION_DISCOVERY, MAX_CHANNELS
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -20,9 +20,8 @@ DEVICE_TYPES = {
 class BusproDiscovery:
     """Class to handle device discovery on HDL Buspro network."""
     
-    def __init__(self, hdl_device: HDLDevice):
+    def __init__(self):
         """Initialize the discovery."""
-        self.hdl_device = hdl_device
         self.discovered_devices: Dict[str, List[dict]] = {
             "light": [],
             "cover": [],
@@ -33,30 +32,34 @@ class BusproDiscovery:
         }
         self._device_status: Dict[str, Dict] = {}  # Stores the last status of each device
 
-    async def scan_network(self) -> Dict[str, List[dict]]:
+    async def scan_network(self, gateway) -> Dict[str, List[dict]]:
         """Scan the network for devices."""
         try:
             _LOGGER.info("Начинаю поиск устройств HDL Buspro...")
+            # Очищаем предыдущие результаты поиска
+            for device_type in self.discovered_devices:
+                self.discovered_devices[device_type] = []
+            
+            # Отправляем запрос обнаружения только для подсети 1
+            subnet_id = 1
+            
+            _LOGGER.info(f"Сканирование подсети {subnet_id} для активных устройств...")
+            
             # Отправляем широковещательное сообщение всем устройствам в сети
-            for subnet_id in range(1, 255):  # Сканируем все возможные подсети
-                try:
-                    response = await self.hdl_device.send_message(
-                        [subnet_id, 0xFF],  # Broadcast in subnet
-                        [0x000D],           # Discovery operation code
-                        []                  # Empty payload for discovery
-                    )
-                    
-                    if response:
-                        _LOGGER.info(f"Обнаружены устройства в подсети {subnet_id}: {response}")
-                        # Process response
-                        self._process_discovery_response(response, subnet_id)
-                except Exception as err:
-                    _LOGGER.debug(f"Error scanning subnet {subnet_id}: {err}")
+            gateway.send_hdl_command(
+                subnet_id,  # Subnet ID
+                0xFF,       # Broadcast device ID
+                OPERATION_DISCOVERY,  # Discovery operation
+                []          # Empty data
+            )
+            
+            # Ждем некоторое время для получения ответов
+            await asyncio.sleep(2)
             
             # Подробная информация об обнаруженных устройствах
             device_count = sum(len(devices) for devices in self.discovered_devices.values())
-            _LOGGER.info(f"Обнаружено всего {device_count} устройств: " + 
-                         ", ".join([f"{len(devices)} {device_type}" for device_type, devices in self.discovered_devices.items() if devices]))
+            _LOGGER.info(f"Обнаружено всего {device_count} активных устройств: " + 
+                        ", ".join([f"{len(devices)} {device_type}" for device_type, devices in self.discovered_devices.items() if devices]))
             
             return self.discovered_devices
 
@@ -64,39 +67,73 @@ class BusproDiscovery:
             _LOGGER.error(f"Ошибка при поиске устройств: {err}")
             return self.discovered_devices
     
-    def _process_discovery_response(self, response, subnet_id):
+    def _process_discovery_response(self, subnet_id, device_id, device_type, discovery_data=None):
         """Process discovery response and categorize devices."""
-        if not response:
+        if subnet_id == 0 or device_id == 0:
+            _LOGGER.warning(f"Пропущено устройство с некорректным ID: {subnet_id}.{device_id}")
             return
             
-        for device in response:
-            if not isinstance(device, dict):
-                continue
-                
-            device_id = device.get("device_id", 0)
-            device_type = device.get("type", 0)
+        if device_type == 0:
+            _LOGGER.warning(f"Пропущено устройство с некорректным типом: {subnet_id}.{device_id}")
+            return
             
-            # Определяем категорию устройства
-            category = self._determine_device_type(device)
-            if not category:
-                continue
+        # Определяем категорию устройства
+        category = None
+        for dev_type, type_ids in DEVICE_TYPES.items():
+            if device_type in type_ids:
+                category = dev_type
+                break
                 
-            # Дополнительная информация для отображения в логах
-            channels = device.get("channels", 1)
-            _LOGGER.debug(f"Обнаружено устройство {category} с ID {subnet_id}.{device_id}, тип: 0x{device_type:X}, каналов: {channels}")
+        if not category:
+            # Если не нашли тип по ID, пробуем определить по дополнительным данным
+            # По умолчанию считаем выключателем света
+            _LOGGER.warning(f"Неизвестный тип устройства 0x{device_type:X} для {subnet_id}.{device_id}, добавляем как light")
+            category = "light"
+                
+        # Получаем количество каналов
+        # Если данные обнаружения содержат информацию о каналах - используем её
+        # По умолчанию у большинства устройств только 1 канал
+        channels = 1
+        if discovery_data and len(discovery_data) > 4:
+            # В большинстве устройств HDL информация о каналах находится в байте 4 или 5
+            # Пробуем извлечь из данных обнаружения
+            try:
+                channels = discovery_data[4]
+                if channels == 0 and len(discovery_data) > 5:
+                    channels = discovery_data[5]
+            except (IndexError, TypeError):
+                channels = 1
+                
+        # Проверка валидности числа каналов
+        max_channels = MAX_CHANNELS.get(category, 1)
+        if channels <= 0 or channels > max_channels:
+            _LOGGER.warning(f"Некорректное количество каналов ({channels}) для устройства {category} {subnet_id}.{device_id}, ограничиваем до {max_channels}")
+            channels = max_channels  # Ограничиваем до максимального количества для данного типа
+                
+        _LOGGER.debug(f"Обнаружено устройство {category} с ID {subnet_id}.{device_id}, тип: 0x{device_type:X}, каналов: {channels}")
+        
+        # Добавляем устройство в список обнаруженных
+        for channel in range(1, channels + 1):
+            device_info = {
+                "subnet_id": subnet_id,
+                "device_id": device_id,
+                "device_type": device_type,
+                "channel": channel,
+                "channels": channels,
+                "name": f"{category.capitalize()} {subnet_id}.{device_id}.{channel}"
+            }
             
-            # Добавляем устройство в список обнаруженных
-            for channel in range(1, channels + 1):
-                device_info = {
-                    "subnet_id": subnet_id,
-                    "device_id": device_id,
-                    "device_type": device_type,
-                    "channel": channel,
-                    "name": f"{category.capitalize()} {subnet_id}.{device_id}.{channel}"
-                }
-                
-                if device_info not in self.discovered_devices[category]:
-                    self.discovered_devices[category].append(device_info)
+            # Проверяем, не добавлено ли уже такое устройство
+            is_duplicate = False
+            for existing_device in self.discovered_devices[category]:
+                if (existing_device["subnet_id"] == subnet_id and 
+                    existing_device["device_id"] == device_id and
+                    existing_device["channel"] == channel):
+                    is_duplicate = True
+                    break
+                    
+            if not is_duplicate:
+                self.discovered_devices[category].append(device_info)
 
     async def poll_devices(self) -> Dict[str, Dict]:
         """Poll all devices to update their status."""
@@ -242,4 +279,8 @@ class BusproDiscovery:
     def get_device_status(self, subnet_id: int, device_id: int) -> Optional[Dict]:
         """Get the current status of a device."""
         device_key = f"{subnet_id}.{device_id}"
-        return self._device_status.get(device_key) 
+        return self._device_status.get(device_key)
+
+    def count_devices(self) -> int:
+        """Count the total number of discovered devices."""
+        return sum(len(devices) for devices in self.discovered_devices.values()) 

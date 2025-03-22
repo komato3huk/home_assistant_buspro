@@ -7,7 +7,7 @@ https://home-assistant.io/...
 
 import logging
 import asyncio
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Any
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
@@ -49,7 +49,9 @@ PLATFORMS = [
     Platform.LIGHT,
     Platform.COVER,
     Platform.CLIMATE,
+    Platform.BINARY_SENSOR,
     Platform.SENSOR,
+    Platform.SWITCH,
 ]
 
 DEFAULT_CONF_NAME = ""
@@ -105,92 +107,36 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     hass.data.setdefault(DOMAIN, {})
     return True
 
-async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Set up HDL Buspro from a config entry."""
-    # Create HDL Buspro device
-    host = entry.data.get(CONF_HOST)
-    port = entry.data.get(CONF_PORT, DEFAULT_PORT)
-    timeout = entry.data.get(CONF_TIMEOUT, DEFAULT_TIMEOUT)
-    subnet_id = entry.data.get(CONF_DEVICE_SUBNET_ID, DEFAULT_DEVICE_SUBNET_ID)
-    device_id = entry.data.get(CONF_DEVICE_ID, DEFAULT_DEVICE_ID)
-    poll_interval = entry.data.get(CONF_POLL_INTERVAL, DEFAULT_POLL_INTERVAL)
-    gateway_host = entry.data.get(CONF_GATEWAY_HOST, DEFAULT_GATEWAY_HOST)
-    gateway_port = entry.data.get(CONF_GATEWAY_PORT, DEFAULT_GATEWAY_PORT)
+    _LOGGER.info("Настройка интеграции HDL Buspro")
     
-    # Если шлюз не указан, используем тот же адрес, что и для основного подключения
-    if not gateway_host:
-        gateway_host = host
+    # Получаем настройки из конфигурации
+    host = config_entry.data.get(CONF_HOST, "255.255.255.255")
+    port = config_entry.data.get(CONF_PORT, 10000)
+    poll_interval = config_entry.data.get(CONF_POLL_INTERVAL, 30)
     
-    # Initialize options if they don't exist yet
-    if not entry.options:
-        options = {
-            CONF_TIMEOUT: timeout,
-            CONF_DEVICE_SUBNET_ID: subnet_id,
-            CONF_DEVICE_ID: device_id,
-            CONF_POLL_INTERVAL: poll_interval,
-            CONF_GATEWAY_HOST: gateway_host,
-            CONF_GATEWAY_PORT: gateway_port,
-        }
-        hass.config_entries.async_update_entry(entry, options=options)
-    else:
-        # Use values from options if set
-        timeout = entry.options.get(CONF_TIMEOUT, timeout)
-        subnet_id = entry.options.get(CONF_DEVICE_SUBNET_ID, subnet_id)
-        device_id = entry.options.get(CONF_DEVICE_ID, device_id)
-        poll_interval = entry.options.get(CONF_POLL_INTERVAL, poll_interval)
-        gateway_host = entry.options.get(CONF_GATEWAY_HOST, gateway_host)
-        gateway_port = entry.options.get(CONF_GATEWAY_PORT, gateway_port)
+    # Инициализируем компоненты системы
+    discovery = BusproDiscovery()
+    gateway = BusproGateway(hass, discovery, port, poll_interval)
     
-    _LOGGER.debug(
-        "Connecting to HDL Buspro at %s:%s with device address %d.%d, gateway: %s:%s",
-        host, port, subnet_id, device_id, gateway_host, gateway_port
-    )
-    
-    # Create HDL device with source address
-    hdl_device = HDLDevice(
-        host, 
-        port, 
-        subnet_id=subnet_id, 
-        device_id=device_id,
-        gateway_host=gateway_host,
-        gateway_port=gateway_port
-    )
-    
-    # Create discovery service
-    discovery = BusproDiscovery(hdl_device)
-    
-    # Create gateway
-    gateway = BusproGateway(hass, hdl_device, discovery, poll_interval)
-    
-    # Perform initial discovery
-    discovered_devices = await discovery.scan_network()
-    
-    # If no devices were discovered, log warning but continue
-    if not discovered_devices:
-        _LOGGER.warning("No HDL Buspro devices discovered")
-    else:
-        _LOGGER.info("Discovered %d HDL Buspro devices", len(discovered_devices))
-    
-    # Store data in hass
+    # Сохраняем объекты в данных Home Assistant
     hass.data.setdefault(DOMAIN, {})
-    hass.data[DOMAIN][entry.entry_id] = {
+    hass.data[DOMAIN][config_entry.entry_id] = {
         "gateway": gateway,
-        "devices": discovered_devices,
+        "discovery": discovery,
     }
     
-    # Initialize gateway
+    # Запускаем шлюз
     await gateway.start()
     
-    # Set up all platforms
-    hass.async_create_task(
-        hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-    )
+    # Запускаем сканирование сети для обнаружения устройств
+    await discovery.scan_network(gateway)
     
-    # Register services
-    # TODO: Add services
+    # Регистрируем платформы
+    await hass.config_entries.async_forward_entry_setups(config_entry, PLATFORMS)
     
-    # Register update listener for options
-    entry.async_on_unload(entry.add_update_listener(async_update_options))
+    _LOGGER.info(f"Интеграция HDL Buspro успешно настроена, обнаружено устройств: {discovery.count_devices()}")
     
     return True
 
@@ -198,21 +144,25 @@ async def async_update_options(hass: HomeAssistant, entry: ConfigEntry) -> None:
     """Update options for the HDL Buspro integration."""
     await hass.config_entries.async_reload(entry.entry_id)
 
-async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
+async def async_unload_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Unload a config entry."""
-    # Get gateway instance
-    gateway = hass.data[DOMAIN][entry.entry_id]["gateway"]
+    _LOGGER.info("Выгрузка интеграции HDL Buspro")
     
-    # Stop gateway
-    await gateway.stop()
+    # Удаляем платформы
+    unload_ok = await hass.config_entries.async_unload_platforms(config_entry, PLATFORMS)
     
-    # Unload platforms
-    unload_ok = await hass.config_entries.async_unload_platforms(entry, PLATFORMS)
-    
-    # Remove config entry from hass
     if unload_ok:
-        hass.data[DOMAIN].pop(entry.entry_id)
+        # Останавливаем шлюз
+        gateway = hass.data[DOMAIN][config_entry.entry_id]["gateway"]
+        await gateway.stop()
         
+        # Удаляем данные интеграции
+        hass.data[DOMAIN].pop(config_entry.entry_id)
+        if not hass.data[DOMAIN]:
+            hass.data.pop(DOMAIN)
+            
+        _LOGGER.info("Интеграция HDL Buspro успешно выгружена")
+    
     return unload_ok
 
 class BusproModule:
