@@ -17,34 +17,95 @@ class TelegramHelper:
     
     def build_telegram_from_udp_data(self, data: bytes, address: Tuple[str, int] = None) -> Dict[str, Any]:
         """Build telegram dictionary from UDP data."""
-        if not data or len(data) < 15:
-            _LOGGER.error(f"Неверный формат данных UDP: {data}, длина: {len(data) if data else 0}")
+        if not data:
+            _LOGGER.error(f"Пустые данные UDP")
+            return None
+            
+        # Проверяем минимальный размер пакета
+        min_length = 15
+        if len(data) < min_length:
+            _LOGGER.error(f"Неверный формат данных UDP: длина {len(data)} < {min_length}")
             return None
 
         try:
-            header = data[2:12].decode('ascii')
-            if header != "HDLMIRACLE":
-                _LOGGER.warning(f"Неверный заголовок пакета: {header}, полный пакет: {binascii.hexlify(data).decode()}")
+            # Проверяем и декодируем заголовок
+            # Пытаемся найти сигнатуру 'HDLMIRACLE'
+            header_start = 2
+            header_length = 10
+            
+            if header_start + header_length <= len(data):
+                header = data[header_start:header_start + header_length].decode('ascii', errors='ignore')
+                if "HDLMIRACLE" not in header:
+                    # Пробуем найти сигнатуру в других позициях
+                    header_found = False
+                    for i in range(0, min(20, len(data) - header_length)):
+                        test_header = data[i:i + header_length].decode('ascii', errors='ignore')
+                        if "HDLMIRACLE" in test_header:
+                            header_start = i
+                            header = test_header
+                            header_found = True
+                            _LOGGER.debug(f"Нестандартная позиция заголовка: {header_start}")
+                            break
+                    
+                    if not header_found:
+                        _LOGGER.warning(f"Неверный заголовок пакета, не найден 'HDLMIRACLE': {binascii.hexlify(data).decode()}")
+                        # Для отладки выводим все возможные интерпретации строк в пакете
+                        for i in range(0, len(data) - 3):
+                            try:
+                                test_str = data[i:i+10].decode('ascii', errors='ignore')
+                                if any(c.isalpha() for c in test_str):
+                                    _LOGGER.debug(f"Возможный заголовок с позиции {i}: {test_str}")
+                            except:
+                                pass
+                        return None
+            else:
+                _LOGGER.warning(f"Данные слишком короткие для заголовка: {binascii.hexlify(data).decode()}")
                 return None
             
             _LOGGER.debug(f"Обработка UDP пакета от {address if address else 'неизвестного источника'}: {binascii.hexlify(data).decode()}")
         except Exception as e:
             _LOGGER.error(f"Ошибка при чтении заголовка пакета: {e}, данные: {binascii.hexlify(data).decode()}")
+            import traceback
+            _LOGGER.error(traceback.format_exc())
             return None
 
         telegram = {}
         try:
-            telegram["source_subnet_id"] = data[12]
-            telegram["source_device_id"] = data[13]
+            # Стандартные позиции после заголовка HDLMIRACLE
+            source_subnet_pos = header_start + header_length
+            source_device_pos = source_subnet_pos + 1
+            operate_code_high_pos = source_device_pos + 1
+            operate_code_low_pos = operate_code_high_pos + 1
+            target_subnet_pos = operate_code_low_pos + 1
+            target_device_pos = target_subnet_pos + 1
             
-            telegram["operate_code"] = (data[14] << 8) | data[15]
+            # Проверяем, что у нас достаточно данных для извлечения всех полей
+            if target_device_pos + 1 > len(data):
+                _LOGGER.warning(f"Недостаточно данных для декодирования телеграммы: {binascii.hexlify(data).decode()}")
+                return None
             
-            telegram["target_subnet_id"] = data[16]
-            telegram["target_device_id"] = data[17]
+            telegram["source_subnet_id"] = data[source_subnet_pos]
+            telegram["source_device_id"] = data[source_device_pos]
             
-            data_length = len(data) - 20
-            if data_length > 0:
-                telegram["data"] = list(data[20:20 + data_length])
+            telegram["operate_code"] = (data[operate_code_high_pos] << 8) | data[operate_code_low_pos]
+            
+            telegram["target_subnet_id"] = data[target_subnet_pos]
+            telegram["target_device_id"] = data[target_device_pos]
+            
+            # Определяем, где начинаются полезные данные
+            data_start = target_device_pos + 1
+            
+            # Если есть байт длины данных, считываем его
+            if data_start < len(data):
+                data_length = data[data_start]
+                data_start += 1
+                
+                # Проверяем, что данные не выходят за пределы пакета
+                if data_start + data_length <= len(data):
+                    telegram["data"] = list(data[data_start:data_start + data_length])
+                else:
+                    # Берем все оставшиеся данные, если длина указана некорректно
+                    telegram["data"] = list(data[data_start:])
             else:
                 telegram["data"] = []
                 
@@ -55,6 +116,7 @@ class TelegramHelper:
                 f"Данные: {telegram['data']}"
             )
             
+            # Особая обработка для пакетов с кодом обнаружения устройств
             if telegram["operate_code"] == 0xFA3:
                 device_type = 0
                 if len(telegram["data"]) >= 2:
@@ -69,6 +131,8 @@ class TelegramHelper:
             
         except Exception as e:
             _LOGGER.error(f"Ошибка при разборе телеграммы: {e}, данные: {binascii.hexlify(data).decode()}")
+            import traceback
+            _LOGGER.error(traceback.format_exc())
             return None
 
     @staticmethod
@@ -83,61 +147,99 @@ class TelegramHelper:
             telegram.source_device_type = DeviceType.PyBusPro
         return telegram
 
-    # noinspection SpellCheckingInspection
-    def build_send_buffer(self, telegram):
-        """Build buffer from telegram for sending."""
-        if not isinstance(telegram, dict):
-            _LOGGER.error(f"Неверный формат телеграммы: {telegram}")
-            return None
+    def build_send_buffer(self, telegram: Dict[str, Any]) -> bytes:
+        """Build send buffer from telegram dictionary.
+        
+        Args:
+            telegram: Telegram dictionary with target_subnet_id, target_device_id, etc.
             
+        Returns:
+            bytes: Send buffer for UDP transmission
+        """
         try:
-            if "subnet_id" not in telegram or "device_id" not in telegram:
-                _LOGGER.error(f"В телеграмме отсутствуют обязательные поля: {telegram}")
+            if not isinstance(telegram, dict):
+                _LOGGER.error(f"Неверный формат телеграммы, ожидался словарь: {telegram}")
                 return None
                 
-            operate_code = telegram.get("operate_code", 0x0000)
+            # Проверяем наличие необходимых полей
+            required_fields = ["target_subnet_id", "target_device_id", "operate_code"]
+            for field in required_fields:
+                if field not in telegram:
+                    _LOGGER.error(f"В телеграмме отсутствует обязательное поле: {field}")
+                    return None
+                    
+            # Получаем значения полей
+            source_subnet_id = telegram.get("source_subnet_id", 1)
+            source_device_id = telegram.get("source_device_id", 1)
+            operate_code = telegram.get("operate_code", 0)
+            target_subnet_id = telegram.get("target_subnet_id")
+            target_device_id = telegram.get("target_device_id")
             data = telegram.get("data", [])
             
+            # Проверяем, что data - это список
+            if not isinstance(data, list):
+                try:
+                    data = list(data)
+                except (TypeError, ValueError):
+                    _LOGGER.error(f"Не удалось преобразовать данные в список: {data}")
+                    data = []
+            
+            # Создаем буфер отправки
             buffer = bytearray()
             
-            buffer.extend(b'\x0A\x00\x50\x0A\x48\x44\x4C\x4D\x49\x52\x41\x43\x4C\x45')
+            # Добавляем заголовок
+            buffer.extend(b"\xAA\xAA")  # Начальные байты
+            buffer.extend(b"HDLMIRACLE") # Сигнатура
             
-            buffer.append(telegram.get("source_subnet_id", 0x01))
-            buffer.append(telegram.get("source_device_id", 0x01))
+            # Добавляем адрес источника
+            buffer.append(source_subnet_id & 0xFF)
+            buffer.append(source_device_id & 0xFF)
             
+            # Добавляем код операции (2 байта)
             buffer.append((operate_code >> 8) & 0xFF)
             buffer.append(operate_code & 0xFF)
             
-            buffer.append(telegram["subnet_id"])
-            buffer.append(telegram["device_id"])
+            # Добавляем адрес назначения
+            buffer.append(target_subnet_id & 0xFF)
+            buffer.append(target_device_id & 0xFF)
             
-            data_length = len(data)
-            buffer.append(data_length)
+            # Добавляем длину данных и сами данные
+            buffer.append(len(data) & 0xFF)
+            buffer.extend(data)
             
-            if data_length > 0:
-                buffer.extend(data)
-                
-            crc = 0
-            for i in range(14, len(buffer)):
-                crc += buffer[i]
-            buffer.append((crc >> 8) & 0xFF)
+            # Добавляем CRC
+            crc = self._calculate_crc(buffer)
             buffer.append(crc & 0xFF)
             
-            _LOGGER.debug(f"Отправка телеграммы: {binascii.hexlify(buffer).decode()}")
+            _LOGGER.debug(
+                f"Создан буфер отправки: {binascii.hexlify(buffer).decode()}, "
+                f"Источник: {source_subnet_id}.{source_device_id}, "
+                f"Код: 0x{operate_code:04X}, "
+                f"Цель: {target_subnet_id}.{target_device_id}, "
+                f"Данные: {data}"
+            )
             
-            return buffer
+            return bytes(buffer)
             
         except Exception as e:
-            _LOGGER.error(f"Ошибка при создании буфера отправки: {e}, телеграмма: {telegram}")
+            _LOGGER.error(f"Ошибка при создании буфера отправки: {e}")
+            import traceback
+            _LOGGER.error(traceback.format_exc())
             return None
-
-    def _calculate_crc(self, length_of_data_package, send_buf):
-        crc_buf_length = length_of_data_package - 2
-        crc_buf = send_buf[-crc_buf_length:]
-        crc_buf_as_bytes = bytes(crc_buf)
-        crc = self._crc16(crc_buf_as_bytes)
-
-        return pack(">H", crc)
+            
+    def _calculate_crc(self, buffer: bytearray) -> int:
+        """Calculate CRC for buffer.
+        
+        Args:
+            buffer: Buffer to calculate CRC for
+            
+        Returns:
+            int: CRC value
+        """
+        crc = 0
+        for i in range(len(buffer)):
+            crc += buffer[i]
+        return crc & 0xFF
 
     def _calculate_crc_from_telegram(self, telegram):
         length_of_data_package = 11 + len(telegram.payload)

@@ -58,14 +58,18 @@ class BusproDiscovery:
             subnet_id = device_info.get("subnet_id")
             device_id = device_info.get("device_id")
             device_type = device_info.get("device_type")
+            raw_data = device_info.get("raw_data", [])
             
-            _LOGGER.info(f"---> ОБРАБОТКА УСТРОЙСТВА: {subnet_id}.{device_id}, тип 0x{device_type:04X}")
+            _LOGGER.info(f"[DISCOVERY] Обработка устройства: {subnet_id}.{device_id}, тип: 0x{device_type:04X}")
+            _LOGGER.debug(f"[DISCOVERY] Сырые данные: {raw_data}")
             
             # Получаем модель и название по типу устройства
             model = self._get_model_by_type(device_type)
             name = f"{model} {subnet_id}.{device_id}"
             
-            # Классифицируем устройство и добавляем его во внутренний словарь устройств
+            _LOGGER.info(f"[DISCOVERY] Модель: {model}")
+            
+            # Классифицируем устройство по его типу
             device_info = self._classify_device_by_type(device_type, subnet_id, device_id, model, name)
             
             # Добавляем устройство отдельно в лог для наглядности
@@ -74,9 +78,30 @@ class BusproDiscovery:
             _LOGGER.info(f"** Адрес: {subnet_id}.{device_id}")
             _LOGGER.info(f"** Тип: 0x{device_type:04X}")
             _LOGGER.info(f"** Модель: {model}")
+            
             if device_info:
                 _LOGGER.info(f"** Категория: {device_info.get('category', 'Неизвестно')}")
                 _LOGGER.info(f"** Каналы: {device_info.get('channels', 0)}")
+                
+                # Добавляем информацию о самом устройстве в устройства для Home Assistant
+                device_category = device_info.get('category')
+                channels = device_info.get('channels', 1)
+                
+                # Формируем уникальный ключ устройства для проверки наличия дубликатов
+                device_key = f"{subnet_id}.{device_id}"
+                
+                if hasattr(self, '_processed_devices') and device_key in self._processed_devices:
+                    _LOGGER.debug(f"[DISCOVERY] Устройство {device_key} уже обработано, пропускаем")
+                else:
+                    # Запоминаем, что это устройство уже обработано
+                    if not hasattr(self, '_processed_devices'):
+                        self._processed_devices = set()
+                    self._processed_devices.add(device_key)
+                    
+                    _LOGGER.info(f"[DISCOVERY] Добавляем {channels} каналов устройства в категорию {device_category}")
+            else:
+                _LOGGER.warning(f"[DISCOVERY] Не удалось классифицировать устройство с типом 0x{device_type:04X}")
+                
             _LOGGER.info(f"****************************************")
             
         except Exception as e:
@@ -84,11 +109,18 @@ class BusproDiscovery:
             import traceback
             _LOGGER.error(traceback.format_exc())
 
-    async def discover_devices(self, subnet_id: int = None, timeout: int = 5) -> Dict[str, List[Dict[str, Any]]]:
+    async def discover_devices(self, subnet_id: int = None, timeout: int = 10) -> Dict[str, List[Dict[str, Any]]]:
         """Discover HDL Buspro devices."""
-        # Всегда сканируем подсеть 1 и включаем широковещательное обнаружение
+        # Всегда включаем подсеть 1 независимо от настроек
         subnets_to_scan = [1]
-        _LOGGER.info(f"Начинаем поиск устройств HDL Buspro в подсети 1 и широковещательное обнаружение...")
+        if subnet_id and subnet_id != 1:
+            subnets_to_scan.append(subnet_id)
+            
+        _LOGGER.info(f"=====================================")
+        _LOGGER.info(f"НАЧАЛО ПОИСКА УСТРОЙСТВ HDL BUSPRO")
+        _LOGGER.info(f"Сканирование подсетей: {subnets_to_scan}")
+        _LOGGER.info(f"Через шлюз: {self.gateway_host}:{self.gateway_port}")
+        _LOGGER.info(f"=====================================")
 
         # Очищаем предыдущие результаты обнаружения
         for device_type in self.devices:
@@ -99,213 +131,64 @@ class BusproDiscovery:
         
         # Запускаем реальное обнаружение устройств
         try:
-            _LOGGER.info(f"Сканирование подсетей: {subnets_to_scan} и широковещательный запрос")
-            
             # Сначала отправляем широковещательный запрос для обнаружения всех устройств
-            success = await self.send_discovery_packet(0xFF)
-            if success:
-                _LOGGER.info(f"Широковещательный запрос обнаружения отправлен успешно")
-            else:
-                _LOGGER.warning(f"Не удалось отправить широковещательный запрос обнаружения")
+            await self._send_broadcast_discovery()
             
             # Даем время устройствам ответить
-            await asyncio.sleep(1.0)  # Увеличиваем паузу до 1 секунды
+            await asyncio.sleep(2.0)
             
-            # Отправляем запросы на обнаружение в подсеть 1
+            # Затем перебираем все указанные подсети
             for current_subnet in subnets_to_scan:
-                success = await self.send_discovery_packet(current_subnet)
-                if success:
-                    _LOGGER.info(f"Запрос обнаружения отправлен в подсеть {current_subnet}")
-                else:
-                    _LOGGER.warning(f"Не удалось отправить запрос обнаружения в подсеть {current_subnet}")
+                # Отправляем запрос на обнаружение всех устройств в подсети
+                await self._send_subnet_discovery(current_subnet)
                 
-                # Делаем более длинную паузу между запросами
-                await asyncio.sleep(1.0)  # Увеличиваем паузу до 1 секунды
-            
-            # Повторно отправляем запросы для надежности
-            success = await self.send_discovery_packet(0xFF)  # Снова широковещательный запрос
-            await asyncio.sleep(1.0)
-            
-            for current_subnet in subnets_to_scan:
-                await self.send_discovery_packet(current_subnet)
+                # Даем время устройствам ответить
                 await asyncio.sleep(1.0)
-
-            # Даем больше времени устройствам ответить и обработаться в системе
-            _LOGGER.info(f"Ожидаем ответы от устройств ({timeout} сек). Обнаруженные устройства будут записаны в лог...")
-            extended_timeout = max(10, timeout)  # Минимум 10 секунд ожидания
-            for i in range(extended_timeout):
+                
+                # Повторяем запрос для надежности
+                await self._send_subnet_discovery(current_subnet)
+                await asyncio.sleep(1.0)
+            
+            # Еще раз отправляем широковещательный запрос
+            await self._send_broadcast_discovery()
+            
+            # Даем время устройствам ответить
+            _LOGGER.info(f"Ожидание ответов от устройств ({timeout} сек)...")
+            
+            # Ожидаем ответы от устройств с таймаутом
+            for i in range(timeout):
                 await asyncio.sleep(1)
-                _LOGGER.debug(f"Ожидание ответов: прошло {i+1} сек из {extended_timeout}...")
-        
+                _LOGGER.debug(f"Ожидание ответов: прошло {i+1} сек из {timeout}...")
+            
+            # Выводим итоговую информацию
+            found_devices = 0
+            for device_type, devices in self.devices.items():
+                if devices:
+                    _LOGGER.info(f"Найдено устройств типа {device_type}: {len(devices)}")
+                    found_devices += len(devices)
+            
+            _LOGGER.info(f"=====================================")
+            _LOGGER.info(f"ПОИСК УСТРОЙСТВ HDL BUSPRO ЗАВЕРШЕН")
+            _LOGGER.info(f"Всего найдено устройств: {found_devices}")
+            _LOGGER.info(f"=====================================")
+            
+            return self.devices
+            
         except Exception as e:
             _LOGGER.error(f"Ошибка при обнаружении устройств: {e}")
-            # Если произошла ошибка, используем симуляцию как запасной вариант
-            _LOGGER.warning("Использую симуляцию обнаружения устройств в качестве запасного варианта")
-            await self._simulated_discovery(subnet_id)
-
-        # Подробный вывод всех обнаруженных ID устройств
-        _LOGGER.info("=" * 50)
-        _LOGGER.info("СПИСОК ВСЕХ ОБНАРУЖЕННЫХ УСТРОЙСТВ HDL BUSPRO:")
-        _LOGGER.info("=" * 50)
-        
-        # Создадим словарь для хранения уникальных устройств (subnet_id, device_id) -> device_type
-        unique_devices = {}
-        
-        # Сначала соберем все уникальные устройства
-        for device_type, devices in self.devices.items():
-            for device in devices:
-                key = (device.get("subnet_id"), device.get("device_id"))
-                unique_devices[key] = device.get("device_type", 0xFFFF)
-        
-        # Теперь выведем информацию о каждом уникальном устройстве
-        for (subnet_id, device_id), device_type in sorted(unique_devices.items()):
-            model = self._get_model_by_type(device_type)
-            _LOGGER.info(f"Устройство {subnet_id}.{device_id} - Тип: 0x{device_type:04X} - Модель: {model}")
-        
-        _LOGGER.info("=" * 50)
-        
-        # Вывод информации о неизвестных типах устройств
-        if self.unknown_device_types:
-            _LOGGER.info("НЕИЗВЕСТНЫЕ ТИПЫ УСТРОЙСТВ:")
-            for device_type in sorted(self.unknown_device_types):
-                _LOGGER.info(f"Тип: 0x{device_type:04X} - Добавьте эту информацию разработчику")
-            _LOGGER.info("=" * 50)
-        
-        # Логируем результаты обнаружения
-        total_devices = sum(len(devices) for devices in self.devices.values())
-        _LOGGER.info(f"Обнаружено устройств HDL Buspro: {total_devices}")
-        
-        for device_type, devices in self.devices.items():
-            if devices:
-                _LOGGER.info(f"- {device_type}: {len(devices)}")
-                for device in devices:
-                    _LOGGER.info(f"  * {device.get('name', 'Unnamed')} ({device.get('subnet_id')}.{device.get('device_id')}.{device.get('channel', 0)})")
-
-        # Вызываем коллбеки для уведомления о завершении обнаружения
-        for callback in self._callbacks:
-            callback(self.devices)
-
-        return self.devices
-
-    async def _simulated_discovery(self, subnet_id: int):
-        """Симуляция обнаружения устройств для тестирования."""
-        # Очищаем предыдущие результаты обнаружения
-        for device_type in self.devices:
-            self.devices[device_type] = []
+            import traceback
+            _LOGGER.error(traceback.format_exc())
+            return self.devices
             
-        # Добавляем устройства климат-контроля (теплый пол)
-        self.devices[CLIMATE].extend([
-            {
-                "subnet_id": 1,
-                "device_id": 4,
-                "channel": 1,
-                "name": "Теплый пол 1.4.1",
-                "model": "HDL-MFHC01.431",
-                "device_type": 0x0073,  # Тип устройства для Floor Heating Controller
-            }
-        ])
-
-        # Добавляем контроллер штор (рольставни)
-        self.devices[COVER].extend([
-            {
-                "subnet_id": 1,
-                "device_id": 3,
-                "channel": 1,
-                "name": "Шторы гостиная",
-                "model": "HDL-MW02.431",
-            },
-            {
-                "subnet_id": 1,
-                "device_id": 3,
-                "channel": 2,
-                "name": "Шторы спальня",
-                "model": "HDL-MW02.431", 
-            }
-        ])
-
-        # Добавляем сенсоры температуры
-        self.devices[SENSOR].extend([
-            {
-                "subnet_id": 1,
-                "device_id": 4,  # Тот же адрес, что и у климат-контроллера
-                "channel": 1,
-                "name": "Температура пола 1.4.1",
-                "model": "HDL-MFHC01.431",
-                "type": "temperature",
-            }
-        ])
-
-        # Добавляем диммеры (освещение)
-        self.devices[LIGHT].extend([
-            {
-                "subnet_id": subnet_id,
-                "device_id": 2,
-                "channel": 1,
-                "name": f"Свет 1 {subnet_id}.2.1",
-                "model": "HDL-MDT0402.433",  # Модель диммера
-            },
-            {
-                "subnet_id": subnet_id,
-                "device_id": 2,
-                "channel": 2,
-                "name": f"Свет 2 {subnet_id}.2.2",
-                "model": "HDL-MDT0402.433",  # Модель диммера
-            },
-        ])
-
-        # Добавляем реле (выключатели)
-        self.devices[SWITCH].extend([
-            {
-                "subnet_id": subnet_id,
-                "device_id": 5,
-                "channel": 1,
-                "name": f"Розетка 1 {subnet_id}.5.1",
-                "model": "HDL-MR0810.433",  # Модель реле
-            },
-            {
-                "subnet_id": subnet_id,
-                "device_id": 5,
-                "channel": 2,
-                "name": f"Розетка 2 {subnet_id}.5.2",
-                "model": "HDL-MR0810.433",  # Модель реле
-            },
-            {
-                "subnet_id": subnet_id,
-                "device_id": 5,
-                "channel": 3,
-                "name": f"Розетка 3 {subnet_id}.5.3",
-                "model": "HDL-MR0810.433",  # Модель реле
-            },
-            {
-                "subnet_id": subnet_id,
-                "device_id": 5,
-                "channel": 4,
-                "name": f"Розетка 4 {subnet_id}.5.4",
-                "model": "HDL-MR0810.433",  # Модель реле
-            }
-        ])
-
-        # Добавляем бинарные сенсоры (датчики)
-        self.devices[BINARY_SENSOR].extend([
-            {
-                "subnet_id": subnet_id,
-                "device_id": 6,
-                "channel": 1,
-                "name": f"Датчик движения {subnet_id}.6.1",
-                "model": "HDL-MSPU05.4C",  # Модель мультисенсора
-            }
-        ])
+    async def _send_broadcast_discovery(self):
+        """Отправить широковещательный запрос обнаружения."""
+        _LOGGER.info(f"Отправка широковещательного запроса обнаружения...")
+        await self.send_discovery_packet(0xFF)
         
-        _LOGGER.info(f"Результаты симулированного обнаружения устройств в подсети {subnet_id}:")
-        for device_type, devices in self.devices.items():
-            if devices:
-                _LOGGER.info(f"- {device_type}: {len(devices)} устройств")
-                for device in devices:
-                    _LOGGER.info(f"  * {device['name']} ({device['subnet_id']}.{device['device_id']}.{device['channel']})")
-
-        # Вызываем коллбеки для уведомления о завершении обнаружения
-        for callback in self._callbacks:
-            callback(self.devices)
+    async def _send_subnet_discovery(self, subnet_id):
+        """Отправить запрос обнаружения для конкретной подсети."""
+        _LOGGER.info(f"Отправка запроса обнаружения для подсети {subnet_id}...")
+        await self.send_discovery_packet(subnet_id)
 
     def register_callback(self, callback: Callable):
         """Register a callback for device discovery."""

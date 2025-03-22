@@ -5,6 +5,7 @@ import socket
 import time
 from datetime import timedelta
 from typing import Any, Dict, List, Optional, Tuple
+import binascii
 
 from homeassistant.core import HomeAssistant
 
@@ -530,17 +531,22 @@ class BusproGateway:
     async def _handle_received_data(self, data, addr):
         """Handle received data from UDP socket."""
         try:
+            # Проверяем, что данные не пустые
+            if not data:
+                _LOGGER.warning("Получены пустые UDP данные")
+                return
+                
             # Преобразуем полученные данные в телеграмму
             telegram = self.telegram_helper.build_telegram_from_udp_data(data, address=addr)
             if not telegram:
-                _LOGGER.debug(f"Не удалось разобрать данные от {addr}: {data.hex()}")
+                _LOGGER.debug(f"Не удалось разобрать данные от {addr}: {binascii.hexlify(data).decode()}")
                 return
                 
             source_subnet_id = telegram.get("source_subnet_id")
             source_device_id = telegram.get("source_device_id")
             operate_code = telegram.get("operate_code", 0)
             
-            _LOGGER.debug(f"Получено сообщение с opcode=0x{operate_code:04X} от {source_subnet_id}.{source_device_id}: {data.hex()}")
+            _LOGGER.debug(f"Получено сообщение с opcode=0x{operate_code:04X} от {source_subnet_id}.{source_device_id}")
             
             # Проверяем, является ли это ответом на запрос обнаружения
             if operate_code == 0xFA3 and len(telegram.get("data", [])) >= 2:
@@ -557,50 +563,91 @@ class BusproGateway:
                     "receive_time": time.time(),
                     "source_address": addr
                 }
-                _LOGGER.info(f"Детали устройства HDL: {device_info}")
-                
-                # Отладочная информация - полностью вывести содержимое пакета
-                _LOGGER.debug(f"Полный пакет обнаружения: {data.hex()}")
-                _LOGGER.debug(f"Данные телеграммы: {telegram}")
+                _LOGGER.debug(f"Детали устройства HDL: {device_info}")
                 
                 # Добавляем устройство в список для discovery
                 if self.discovery_callback:
                     await self.discovery_callback(device_info)
                     _LOGGER.debug(f"Вызван callback обнаружения для устройства {source_subnet_id}.{source_device_id}")
-                else:
-                    _LOGGER.warning(f"Callback обнаружения не зарегистрирован, устройство {source_subnet_id}.{source_device_id} не будет добавлено")
             
-            # Обрабатываем ответы на запросы
+            # Обрабатываем ответы на запросы для зарегистрированных обратных вызовов
             if self._callbacks:
-                # Берем копию словаря для безопасного итерирования
-                callbacks_copy = self._callbacks.copy()
-                for callback_key, callback_info in callbacks_copy.items():
-                    try:
-                        callback_subnet_id, callback_device_id, callback_operate_code = callback_key
+                # Создаем копию для безопасного итерирования
+                callbacks_to_process = {}
+                
+                # Сначала проверяем обратные вызовы для конкретных устройств
+                for callback_key, callback_data in self._callbacks.items():
+                    # Проверяем формат ключа для колбэков устройств
+                    if isinstance(callback_key, str) and "." in callback_key:
+                        try:
+                            # Разбираем ключ вида "subnet_id.device_id.channel"
+                            parts = callback_key.split(".")
+                            if len(parts) >= 3:
+                                cb_subnet_id = int(parts[0])
+                                cb_device_id = int(parts[1])
+                                cb_channel = int(parts[2])
+                                
+                                # Проверяем, соответствует ли полученное сообщение устройству
+                                if source_subnet_id == cb_subnet_id and source_device_id == cb_device_id:
+                                    callbacks_to_process[callback_key] = (callback_data, cb_channel)
+                        except (ValueError, IndexError) as e:
+                            _LOGGER.warning(f"Неверный формат ключа callback {callback_key}: {e}")
+                    
+                    # Проверяем ключ для колбэков ожидания ответа на конкретный запрос
+                    elif isinstance(callback_key, tuple) and len(callback_key) == 3:
+                        cb_subnet_id, cb_device_id, cb_operate_code = callback_key
                         
                         # Проверяем, соответствует ли полученное сообщение ожидаемому ответу
-                        if (source_subnet_id == callback_subnet_id and 
-                            source_device_id == callback_device_id and 
-                            operate_code == callback_operate_code):
+                        if (source_subnet_id == cb_subnet_id and 
+                            source_device_id == cb_device_id and 
+                            operate_code == cb_operate_code):
                             
-                            # Извлекаем callback
-                            callback, future, timeout_handle = callback_info
+                            # Обрабатываем callback ожидания ответа
+                            callback, future, timeout_handle = callback_data
                             
-                            # Отменяем таймер ожидания
                             if timeout_handle:
                                 timeout_handle.cancel()
                                 
-                            # Удаляем callback из словаря
+                            # Удаляем из словаря оригинальных колбэков
                             self._callbacks.pop(callback_key, None)
                             
                             # Вызываем callback
                             if callback:
-                                response = callback(telegram)
-                                # Если есть future, устанавливаем результат
-                                if future and not future.done():
-                                    future.set_result(response)
-                    except Exception as e:
-                        _LOGGER.error(f"Ошибка при обработке callback: {e}")
+                                try:
+                                    response = callback(telegram)
+                                    # Если есть future, устанавливаем результат
+                                    if future and not future.done():
+                                        future.set_result(response)
+                                except Exception as e:
+                                    _LOGGER.error(f"Ошибка при вызове callback ожидания ответа: {e}")
+                                    import traceback
+                                    _LOGGER.error(traceback.format_exc())
+                
+                # Теперь вызываем колбэки для устройств
+                for callback_key, (callback_list, channel) in callbacks_to_process.items():
+                    for callback in callback_list:
+                        try:
+                            # Получаем значение из данных телеграммы
+                            value = None
+                            if "data" in telegram and len(telegram["data"]) > 0:
+                                # Если это ответ на запрос статуса, берем значение из данных
+                                if operate_code == 0x0032:  # ReadStatus
+                                    if len(telegram["data"]) > 1:
+                                        # Первый байт обычно номер канала
+                                        channel_in_data = telegram["data"][0]
+                                        if channel_in_data == channel and len(telegram["data"]) > 1:
+                                            value = telegram["data"][1]
+                                else:
+                                    # Для других команд просто берем первый байт данных
+                                    value = telegram["data"][0]
+                            
+                            # Вызываем callback с полученными данными
+                            await callback(source_subnet_id, source_device_id, channel, value, telegram)
+                            
+                        except Exception as e:
+                            _LOGGER.error(f"Ошибка при вызове callback для устройства {callback_key}: {e}")
+                            import traceback
+                            _LOGGER.error(traceback.format_exc())
             
             # Обновляем обработчик сообщений для всех зарегистрированных слушателей
             for listener in self._message_listeners:
@@ -611,11 +658,19 @@ class BusproGateway:
                     
         except Exception as e:
             _LOGGER.error(f"Ошибка при обработке полученных данных: {e}")
+            import traceback
+            _LOGGER.error(traceback.format_exc())
 
     async def register_for_discovery(self, callback):
         """Register callback for device discovery."""
         self.discovery_callback = callback
         _LOGGER.info(f"Зарегистрирован обработчик обнаружения устройств")
+        
+        # Отладочно выводим список всех зарегистрированных колбэков
+        _LOGGER.debug(f"Callback для обнаружения: {callback}")
+        _LOGGER.debug(f"Текущие колбэки для устройств: {self._callbacks.keys()}")
+        
+        return True
 
     async def send_message(self, target_address, operation_code, data=None, timeout=2.0):
         """Send message to the HDL Buspro gateway."""

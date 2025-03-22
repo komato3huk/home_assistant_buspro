@@ -6,6 +6,7 @@ from typing import Tuple, Dict, Any, List, Callable, Optional
 from .udp_client import UDPClient
 from ..helpers.telegram_helper import TelegramHelper
 # from ..devices.control import Control
+import binascii
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -45,10 +46,38 @@ class NetworkInterface:
         self._udp_client = UDPClient(self.parent, self.hdl_gateway_host, self._udp_request_received)
 
     def _udp_request_received(self, data, address):
-        if self.callbacks:
+        """Callback for received UDP data."""
+        if not data:
+            _LOGGER.warning("Получены пустые UDP данные от %s", address)
+            return
+            
+        try:
+            # Создаем телеграмму из полученных данных
             telegram = self._th.build_telegram_from_udp_data(data, address)
+            
+            if not telegram:
+                _LOGGER.warning("Не удалось создать телеграмму из данных: %s", binascii.hexlify(data).decode())
+                return
+                
+            _LOGGER.debug(
+                "Получена телеграмма от %d.%d, код операции: 0x%04X, адрес: %s", 
+                telegram.get("source_subnet_id", 0), telegram.get("source_device_id", 0),
+                telegram.get("operate_code", 0), address
+            )
+            
+            # Уведомляем все обратные вызовы
             for callback in self.callbacks:
-                callback(telegram)
+                try:
+                    callback(telegram)
+                except Exception as e:
+                    _LOGGER.error("Ошибка в обратном вызове обработки телеграммы: %s", e)
+                    import traceback
+                    _LOGGER.error(traceback.format_exc())
+                    
+        except Exception as e:
+            _LOGGER.error("Ошибка при обработке UDP данных от %s: %s", address, e)
+            import traceback
+            _LOGGER.error(traceback.format_exc())
 
     async def start(self):
         """Start the network interface."""
@@ -192,19 +221,52 @@ class NetworkInterface:
             return False
 
     async def send_telegram(self, telegram):
-        """Send telegram through HDL Buspro gateway."""
+        """Send telegram through HDL Buspro gateway.
+        
+        Args:
+            telegram: Telegram dictionary with target_subnet_id, target_device_id, etc.
+            
+        Returns:
+            bool: True if message was sent successfully
+        """
         try:
+            if not self._udp_client:
+                _LOGGER.error("Невозможно отправить телеграмму: UDP клиент не инициализирован")
+                return False
+                
+            # Создаем буфер для отправки
             message = self._th.build_send_buffer(telegram)
+            
+            if not message:
+                _LOGGER.error("Не удалось создать буфер отправки из телеграммы: %s", telegram)
+                return False
             
             # Логируем отправку через шлюз
             _LOGGER.debug(
-                "Sending telegram through gateway %s:%s to device %d.%d",
+                "Отправка телеграммы через шлюз %s:%s на устройство %d.%d, данные: %s",
                 self.hdl_gateway_host, self.hdl_gateway_port,
-                telegram.get("target_subnet_id", 0), telegram.get("target_device_id", 0)
+                telegram.get("target_subnet_id", 0), telegram.get("target_device_id", 0),
+                binascii.hexlify(message).decode()
             )
             
-            result = await self._udp_client.send_message(message)
+            # Отправляем сообщение через UDP клиент
+            result = await self._udp_client.send(
+                message,
+                host=self.hdl_gateway_host,
+                port=self.hdl_gateway_port
+            )
+            
+            if not result:
+                _LOGGER.warning(
+                    "Не удалось отправить телеграмму на устройство %d.%d через шлюз %s:%s",
+                    telegram.get("target_subnet_id", 0), telegram.get("target_device_id", 0),
+                    self.hdl_gateway_host, self.hdl_gateway_port
+                )
+                
             return result
+            
         except Exception as err:
-            _LOGGER.error("Error sending telegram through gateway: %s", err)
+            _LOGGER.error("Ошибка при отправке телеграммы через шлюз: %s", err)
+            import traceback
+            _LOGGER.error(traceback.format_exc())
             return False
