@@ -1,13 +1,68 @@
-"""Constants for HDL Buspro."""
+"""Constants for the HDL Buspro integration."""
 
 DOMAIN = "buspro"
+DEFAULT_NAME = "HDL Buspro"
 
-# Операционные коды для HDL Buspro
-OPERATION_READ_STATUS = 0x0032      # Read status
-OPERATION_SINGLE_CHANNEL = 0x0031   # Single channel control
-OPERATION_SCENE_CONTROL = 0x0002    # Scene control
-OPERATION_UNIVERSAL_SWITCH = 0x0003 # Universal switch
-OPERATION_DISCOVERY = 0x000D        # Device discovery
+# Конфигурационные параметры
+CONF_DEVICE_SUBNET_ID = "device_subnet_id"
+CONF_DEVICE_ID = "device_id"
+CONF_POLL_INTERVAL = "poll_interval"
+CONF_GATEWAY_HOST = "gateway_host"
+CONF_GATEWAY_PORT = "gateway_port"
+
+# Значения по умолчанию
+DEFAULT_PORT = 10000
+DEFAULT_TIMEOUT = 5
+DEFAULT_DEVICE_SUBNET_ID = 0
+DEFAULT_DEVICE_ID = 1
+DEFAULT_POLL_INTERVAL = 30
+DEFAULT_GATEWAY_HOST = "255.255.255.255"  # Broadcast
+DEFAULT_GATEWAY_PORT = 6000
+
+# Типы устройств
+LIGHT = "light"
+SWITCH = "switch"
+COVER = "cover"
+CLIMATE = "climate"
+SENSOR = "sensor"
+BINARY_SENSOR = "binary_sensor"
+
+# Операционные коды HDL
+OPERATION_DISCOVERY = 0x000E
+OPERATION_READ_STATUS = 0x000C
+OPERATION_SINGLE_CHANNEL = 0x0031
+OPERATION_SCENE_CONTROL = 0x0002
+OPERATION_UNIVERSAL_SWITCH = 0x0003
+OPERATION_CURTAIN_SWITCH = 0xE01C
+
+# Типы сенсоров
+SENSOR_TYPE_TEMPERATURE = 1
+SENSOR_TYPE_HUMIDITY = 2
+SENSOR_TYPE_ILLUMINANCE = 3
+
+# Словарь для преобразования строковых типов из configuration.yaml в внутренние типы
+SENSOR_TYPE_STRINGS = {
+    "temperature": SENSOR_TYPE_TEMPERATURE,
+    "humidity": SENSOR_TYPE_HUMIDITY,
+    "illuminance": SENSOR_TYPE_ILLUMINANCE
+}
+
+# Таблица соответствия типов сенсоров и их единиц измерения
+SENSOR_TYPES = {
+    SENSOR_TYPE_TEMPERATURE: {"name": "Temperature", "unit": "°C"},
+    SENSOR_TYPE_HUMIDITY: {"name": "Humidity", "unit": "%"},
+    SENSOR_TYPE_ILLUMINANCE: {"name": "Illuminance", "unit": "lx"}
+}
+
+# Аттрибуты устройств
+ATTR_BRIGHTNESS = "brightness"
+ATTR_POSITION = "position"
+ATTR_TEMPERATURE = "temperature"
+ATTR_TARGET_TEMPERATURE = "target_temperature"
+ATTR_CURRENT_TEMPERATURE = "current_temperature"
+ATTR_FAN_MODE = "fan_mode"
+ATTR_HVAC_MODE = "hvac_mode"
+ATTR_PRESET_MODE = "preset_mode"
 
 # Максимальное количество каналов для разных типов устройств
 MAX_CHANNELS = {
@@ -21,9 +76,6 @@ MAX_CHANNELS = {
 
 # Таймаут операций в секундах
 OPERATION_TIMEOUT = 3.0
-
-# Интервал опроса устройств в секундах (по умолчанию)
-DEFAULT_POLL_INTERVAL = 30
 
 # Device Types
 DEVICE_TYPE_LIGHT = "light"
@@ -53,6 +105,13 @@ DEFAULT_DEVICE_SUBNET_ID = 200  # Default subnet ID for the gateway
 DEFAULT_DEVICE_ID = 200  # Default device ID for the gateway
 DEFAULT_GATEWAY_HOST = ""  # По умолчанию используем тот же хост, что и для подключения
 DEFAULT_GATEWAY_PORT = 6000  # Стандартный порт для HDL Buspro
+
+# Mapping string types from configuration.yaml to internal types
+SENSOR_TYPE_STRINGS = {
+    "temperature": 0x01,
+    "humidity": 0x02,
+    "illuminance": 0x03,
+}
 
 # Translations
 ATTR_BRIGHTNESS = "brightness"

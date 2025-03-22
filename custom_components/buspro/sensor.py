@@ -31,7 +31,7 @@ from homeassistant.helpers.entity import Entity
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.config_entries import ConfigEntry
 
-from .const import DOMAIN, OPERATION_READ_STATUS
+from .const import DOMAIN, OPERATION_READ_STATUS, SENSOR_TYPE_STRINGS
 
 DEFAULT_CONF_UNIT_OF_MEASUREMENT = ""
 DEFAULT_CONF_DEVICE_CLASS = "None"
@@ -111,6 +111,77 @@ async def async_setup_entry(
             )
     
     async_add_entities(entities)
+
+async def async_setup_platform(
+    hass: HomeAssistant,
+    config,
+    async_add_entities,
+    discovery_info=None
+) -> None:
+    """Set up Buspro sensor devices from configuration.yaml."""
+    # Проверяем, что компонент Buspro настроен
+    if DOMAIN not in hass.data:
+        _LOGGER.error("Cannot set up sensors - HDL Buspro integration not found")
+        return
+    
+    hdl = hass.data[DOMAIN].get("gateway")
+    if not hdl:
+        _LOGGER.error("Cannot set up sensors - HDL Buspro gateway not found")
+        return
+    
+    entities = []
+    
+    for device_config in config[CONF_DEVICES]:
+        address = device_config[CONF_ADDRESS]
+        name = device_config[CONF_NAME]
+        sensor_type_str = device_config[CONF_TYPE]
+        unit_of_measurement = device_config[CONF_UNIT_OF_MEASUREMENT]
+        device_class = device_config[CONF_DEVICE_CLASS]
+        device_type = device_config.get(CONF_DEVICE)
+        
+        # Парсим адрес устройства
+        address_parts = address.split('.')
+        if len(address_parts) < 2:
+            _LOGGER.error(f"Неверный формат адреса: {address}. Должен быть subnet_id.device_id")
+            continue
+            
+        try:
+            subnet_id = int(address_parts[0])
+            device_id = int(address_parts[1])
+        except ValueError:
+            _LOGGER.error(f"Неверный формат адреса: {address}. Все части должны быть целыми числами")
+            continue
+        
+        # Определяем тип сенсора по строковому значению
+        sensor_type = SENSOR_TYPE_STRINGS.get(sensor_type_str.lower())
+                
+        if sensor_type is None:
+            _LOGGER.error(f"Неизвестный тип сенсора: {sensor_type_str}")
+            continue
+        
+        config = SENSOR_TYPES[sensor_type].copy()
+        if unit_of_measurement:
+            config["unit"] = unit_of_measurement
+        
+        if device_class != DEFAULT_CONF_DEVICE_CLASS:
+            config["device_class"] = device_class
+            
+        _LOGGER.debug(f"Добавление сенсора '{name}' с адресом {subnet_id}.{device_id}, тип '{sensor_type_str}'")
+        
+        entity = BusproSensor(
+            hdl,
+            subnet_id,
+            device_id,
+            name,
+            sensor_type,
+            config
+        )
+        
+        entities.append(entity)
+    
+    if entities:
+        async_add_entities(entities)
+        _LOGGER.info(f"Добавлено {len(entities)} сенсоров HDL Buspro из configuration.yaml")
 
 # noinspection PyAbstractClass
 class BusproSensor(SensorEntity):

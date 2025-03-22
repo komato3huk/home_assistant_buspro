@@ -2,14 +2,16 @@
 import asyncio
 import logging
 import ipaddress
+import socket
 from typing import Any, Dict, Optional
 
 import voluptuous as vol
 
-from homeassistant import config_entries
+from homeassistant import config_entries, core, exceptions
 from homeassistant.core import callback
 from homeassistant.data_entry_flow import FlowResult
 from homeassistant.const import CONF_HOST, CONF_PORT, CONF_TIMEOUT
+import homeassistant.helpers.config_validation as cv
 
 from .const import (
     DOMAIN,
@@ -30,21 +32,25 @@ from .discovery import BusproDiscovery
 
 _LOGGER = logging.getLogger(__name__)
 
-# Validation schema for gateway connection
-STEP_USER_DATA_SCHEMA = vol.Schema(
+# Схема данных для настройки
+DATA_SCHEMA = vol.Schema(
     {
         vol.Required(CONF_HOST): str,
         vol.Optional(CONF_PORT, default=DEFAULT_PORT): int,
         vol.Optional(CONF_TIMEOUT, default=DEFAULT_TIMEOUT): int,
-        vol.Optional(CONF_DEVICE_SUBNET_ID, default=DEFAULT_DEVICE_SUBNET_ID): int,
-        vol.Optional(CONF_DEVICE_ID, default=DEFAULT_DEVICE_ID): int,
-        vol.Optional(CONF_POLL_INTERVAL, default=DEFAULT_POLL_INTERVAL): int,
-        vol.Optional(CONF_GATEWAY_HOST, default=DEFAULT_GATEWAY_HOST): str,
-        vol.Optional(CONF_GATEWAY_PORT, default=DEFAULT_GATEWAY_PORT): int,
+        vol.Optional(CONF_DEVICE_SUBNET_ID, default=DEFAULT_DEVICE_SUBNET_ID): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=255)
+        ),
+        vol.Optional(CONF_DEVICE_ID, default=DEFAULT_DEVICE_ID): vol.All(
+            vol.Coerce(int), vol.Range(min=0, max=255)
+        ),
+        vol.Optional(CONF_POLL_INTERVAL, default=DEFAULT_POLL_INTERVAL): vol.All(
+            vol.Coerce(int), vol.Range(min=5, max=300)
+        ),
     }
 )
 
-class BusproConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
+class BusproFlowHandler(config_entries.ConfigFlow, domain=DOMAIN):
     """Handle a config flow for HDL Buspro."""
 
     VERSION = 1
@@ -53,73 +59,86 @@ class BusproConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     def __init__(self):
         """Initialize the config flow."""
         self.discovery = None
-        self.discovered_devices = {}
+        self._discovered_devices = {}
+        self._errors = {}
         self.host = None
         self.port = None
 
-    async def async_step_user(self, user_input: Optional[Dict[str, Any]] = None) -> FlowResult:
+    async def async_step_user(self, user_input=None):
         """Handle the initial step."""
         errors = {}
 
         if user_input is not None:
-            # Validate IP address
+            host = user_input[CONF_HOST]
+            port = user_input[CONF_PORT]
+            timeout = user_input[CONF_TIMEOUT]
+            subnet_id = user_input[CONF_DEVICE_SUBNET_ID]
+            device_id = user_input[CONF_DEVICE_ID]
+            poll_interval = user_input[CONF_POLL_INTERVAL]
+
             try:
-                ipaddress.ip_address(user_input[CONF_HOST])
-            except ValueError:
-                errors[CONF_HOST] = "invalid_host"
+                # Проверяем, что хост доступен
+                await self.validate_host(host, port, timeout)
 
-            # Если указан IP шлюза, проверяем его тоже
-            if user_input.get(CONF_GATEWAY_HOST):
-                try:
-                    ipaddress.ip_address(user_input[CONF_GATEWAY_HOST])
-                except ValueError:
-                    errors[CONF_GATEWAY_HOST] = "invalid_host"
+                # Создаем уникальный идентификатор для этого соединения
+                await self.async_set_unique_id(f"{host}:{port}")
+                self._abort_if_unique_id_configured()
 
-            # Validate subnet ID and device ID
-            if not 0 <= user_input[CONF_DEVICE_SUBNET_ID] <= 255:
-                errors[CONF_DEVICE_SUBNET_ID] = "invalid_subnet_id"
-            if not 0 <= user_input[CONF_DEVICE_ID] <= 255:
-                errors[CONF_DEVICE_ID] = "invalid_device_id"
+                # Возвращаем данные для создания записи
+                return self.async_create_entry(
+                    title=f"HDL Buspro ({host}:{port})",
+                    data={
+                        CONF_HOST: host,
+                        CONF_PORT: port,
+                        CONF_TIMEOUT: timeout,
+                        CONF_DEVICE_SUBNET_ID: subnet_id,
+                        CONF_DEVICE_ID: device_id,
+                        CONF_POLL_INTERVAL: poll_interval,
+                    },
+                )
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            except InvalidHost:
+                errors["host"] = "invalid_host"
+            except Exception:  # pylint: disable=broad-except
+                _LOGGER.exception("Unexpected error")
+                errors["base"] = "unknown"
 
-            if not errors:
-                try:
-                    # Test connection to gateway
-                    await self._test_connection(
-                        user_input[CONF_HOST],
-                        user_input[CONF_PORT],
-                        user_input[CONF_TIMEOUT]
-                    )
-
-                    # Create entry with connection data
-                    return self.async_create_entry(
-                        title=f"HDL Buspro Gateway ({user_input[CONF_HOST]})",
-                        data=user_input
-                    )
-                except asyncio.TimeoutError:
-                    errors["base"] = "cannot_connect"
-                except Exception as e:
-                    _LOGGER.exception("Unexpected exception")
-                    errors["base"] = "unknown"
-
+        # Показываем форму с возможными ошибками
         return self.async_show_form(
-            step_id="user",
-            data_schema=STEP_USER_DATA_SCHEMA,
-            errors=errors,
+            step_id="user", data_schema=DATA_SCHEMA, errors=errors
         )
 
-    @staticmethod
-    async def _test_connection(host, port, timeout):
-        """Test if we can connect to the HDL Buspro gateway."""
+    async def validate_host(self, host, port, timeout):
+        """Validate if the host is reachable."""
         try:
-            _, writer = await asyncio.wait_for(
-                asyncio.open_connection(host, port),
-                timeout=timeout
-            )
-            writer.close()
-            await writer.wait_closed()
-        except (OSError, asyncio.TimeoutError) as err:
-            _LOGGER.error("Failed to connect to HDL Buspro gateway: %s", err)
-            raise
+            # Проверяем валидность IP-адреса
+            ipaddress.ip_address(host)
+            
+            # Проверяем, что хост доступен
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.settimeout(timeout)
+            
+            try:
+                # Проверим, может ли сокет быть связан с указанным адресом
+                sock.bind(("0.0.0.0", 0))
+                
+                # Для проверки доступности шлюза, просто пытаемся отправить пустой пакет
+                sock.sendto(b"", (host, port))
+                return True
+            except socket.error as err:
+                _LOGGER.error(f"Ошибка при подключении к {host}:{port}: {err}")
+                raise CannotConnect
+            finally:
+                sock.close()
+        except ValueError:
+            raise InvalidHost
+
+    async def async_step_import(self, user_input=None):
+        """Import a config entry from configuration.yaml."""
+        # Мы преобразуем значения из YAML в соответствующие типы
+        # и вызываем шаг 'user', чтобы обработать ввод
+        return await self.async_step_user(user_input)
 
     async def async_step_select_devices(self, user_input: Optional[Dict[str, Any]] = None):
         """Handle device selection."""
@@ -130,20 +149,20 @@ class BusproConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 data={
                     CONF_HOST: self.host,
                     CONF_PORT: self.port,
-                    "devices": self.discovered_devices
+                    "devices": self._discovered_devices
                 }
             )
 
         # Show device selection form
-        device_count = sum(len(devices) for devices in self.discovered_devices.values())
+        device_count = sum(len(devices) for devices in self._discovered_devices.values())
         
         return self.async_show_form(
             step_id="select_devices",
             description_placeholders={
-                "light_count": len(self.discovered_devices.get("light", [])),
-                "cover_count": len(self.discovered_devices.get("cover", [])),
-                "climate_count": len(self.discovered_devices.get("climate", [])),
-                "sensor_count": len(self.discovered_devices.get("sensor", [])),
+                "light_count": len(self._discovered_devices.get("light", [])),
+                "cover_count": len(self._discovered_devices.get("cover", [])),
+                "climate_count": len(self._discovered_devices.get("climate", [])),
+                "sensor_count": len(self._discovered_devices.get("sensor", [])),
                 "total_count": device_count
             }
         )
@@ -207,3 +226,11 @@ class BusproOptionsFlowHandler(config_entries.OptionsFlow):
         }
 
         return self.async_show_form(step_id="init", data_schema=vol.Schema(options))
+
+
+class CannotConnect(exceptions.HomeAssistantError):
+    """Error to indicate we cannot connect."""
+
+
+class InvalidHost(exceptions.HomeAssistantError):
+    """Error to indicate the host is invalid."""

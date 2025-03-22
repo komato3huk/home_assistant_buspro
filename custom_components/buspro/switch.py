@@ -6,99 +6,181 @@ https://home-assistant.io/components/...
 """
 
 import logging
+from typing import Any, Dict, List, Optional, Tuple, Callable
 
 import homeassistant.helpers.config_validation as cv
 import voluptuous as vol
-from homeassistant.components.switch import SwitchEntity, PLATFORM_SCHEMA
-from homeassistant.const import (CONF_NAME, CONF_DEVICES)
-from homeassistant.core import callback
+from homeassistant.components.switch import (
+    SwitchEntity,
+    PLATFORM_SCHEMA,
+)
+from homeassistant.const import (CONF_NAME, CONF_DEVICES, STATE_ON, STATE_OFF)
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.config_entries import ConfigEntry
+from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.typing import ConfigType, DiscoveryInfoType
 
-from ..buspro import DATA_BUSPRO
+from .const import DOMAIN, OPERATION_SINGLE_CHANNEL, OPERATION_READ_STATUS, SWITCH
 
 _LOGGER = logging.getLogger(__name__)
 
-DEVICE_SCHEMA = vol.Schema({
-    vol.Required(CONF_NAME): cv.string,
-})
-
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
-    vol.Required(CONF_DEVICES): {cv.string: DEVICE_SCHEMA},
+    vol.Required(CONF_DEVICES): {cv.string: cv.string},
 })
 
+async def async_setup_entry(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    async_add_entities: AddEntitiesCallback,
+) -> None:
+    """Set up the HDL Buspro switch platform."""
+    gateway = hass.data[DOMAIN][config_entry.entry_id]["gateway"]
+    discovery = hass.data[DOMAIN][config_entry.entry_id]["discovery"]
+    
+    entities = []
+    
+    # Обрабатываем найденные устройства управления выключателями
+    for device in discovery.get_devices_by_type(SWITCH):
+        subnet_id = device["subnet_id"]
+        # Работаем только с устройствами из подсети 1
+        if subnet_id != 1:
+            continue
+            
+        device_id = device["device_id"]
+        channel = device.get("channel", 1)
+        device_name = device.get("name", f"Switch {subnet_id}.{device_id}.{channel}")
+        
+        entity = BusproSwitch(gateway, subnet_id, device_id, channel, device_name)
+        entities.append(entity)
+    
+    if entities:
+        async_add_entities(entities)
+        _LOGGER.info(f"Добавлено {len(entities)} выключателей HDL Buspro")
 
-# noinspection PyUnusedLocal
-async def async_setup_platform(hass, config, async_add_entites, discovery_info=None):
-    """Set up Buspro switch devices."""
-    # noinspection PyUnresolvedReferences
-    from .pybuspro.devices import Switch
 
-    hdl = hass.data[DATA_BUSPRO].hdl
-    devices = []
+async def async_setup_platform(
+    hass: HomeAssistant,
+    config: ConfigType,
+    async_add_entities: AddEntitiesCallback,
+    discovery_info: Optional[DiscoveryInfoType] = None,
+) -> None:
+    """Set up the HDL Buspro switch platform with configuration.yaml."""
+    # Проверяем, что компонент Buspro настроен
+    if DOMAIN not in hass.data:
+        _LOGGER.error("Cannot set up switches - HDL Buspro integration not found")
+        return
+    
+    hdl = hass.data[DOMAIN].get("gateway")
+    if not hdl:
+        _LOGGER.error("Cannot set up switches - HDL Buspro gateway not found")
+        return
+    
+    entities = []
+    
+    for address, name in config[CONF_DEVICES].items():
+        # Парсим адрес устройства
+        address_parts = address.split('.')
+        if len(address_parts) != 3:
+            _LOGGER.error(f"Неверный формат адреса: {address}. Должен быть subnet_id.device_id.channel")
+            continue
+            
+        try:
+            subnet_id = int(address_parts[0])
+            device_id = int(address_parts[1])
+            channel = int(address_parts[2])
+        except ValueError:
+            _LOGGER.error(f"Неверный формат адреса: {address}. Все части должны быть целыми числами")
+            continue
+        
+        _LOGGER.debug(f"Добавление выключателя '{name}' с адресом {subnet_id}.{device_id}.{channel}")
+        
+        entity = BusproSwitch(hdl, subnet_id, device_id, channel, name)
+        entities.append(entity)
+    
+    if entities:
+        async_add_entities(entities)
+        _LOGGER.info(f"Добавлено {len(entities)} выключателей HDL Buspro из configuration.yaml")
 
-    for address, device_config in config[CONF_DEVICES].items():
-        name = device_config[CONF_NAME]
 
-        address2 = address.split('.')
-        device_address = (int(address2[0]), int(address2[1]))
-        channel_number = int(address2[2])
-        _LOGGER.debug("Adding switch '{}' with address {} and channel number {}".format(name, device_address, channel_number))
-
-        switch = Switch(hdl, device_address, channel_number, name)
-
-        devices.append(BusproSwitch(hass, switch))
-
-    async_add_entites(devices)
-
-
-# noinspection PyAbstractClass
 class BusproSwitch(SwitchEntity):
-    """Representation of a Buspro switch."""
+    """Representation of a HDL Buspro Switch."""
 
-    def __init__(self, hass, device):
-        self._hass = hass
-        self._device = device
-        self.async_register_callbacks()
-
-    @callback
-    def async_register_callbacks(self):
-        """Register callbacks to update hass after device was changed."""
-
-        # noinspection PyUnusedLocal
-        async def after_update_callback(device):
-            """Call after device was updated."""
-            self.async_write_ha_state()
-
-        self._device.register_device_updated_cb(after_update_callback)
-
+    def __init__(
+        self,
+        gateway,
+        subnet_id: int,
+        device_id: int,
+        channel: int,
+        name: str,
+    ):
+        """Initialize the switch."""
+        self._gateway = gateway
+        self._subnet_id = subnet_id
+        self._device_id = device_id
+        self._channel = channel
+        self._attr_name = name
+        self._attr_unique_id = f"switch_{subnet_id}_{device_id}_{channel}"
+        self._state = None
+        self._available = True
+        
     @property
-    def should_poll(self):
-        """No polling needed within Buspro."""
-        return False
-
+    def name(self) -> str:
+        """Return the name of the switch."""
+        return self._attr_name
+        
     @property
-    def name(self):
-        """Return the display name of this light."""
-        return self._device.name
-
-    @property
-    def available(self):
+    def available(self) -> bool:
         """Return True if entity is available."""
-        return self._hass.data[DATA_BUSPRO].connected
-
+        return self._available
+        
     @property
-    def is_on(self):
-        """Return true if light is on."""
-        return self._device.is_on
-
-    async def async_turn_on(self, **kwargs):
-        """Instruct the switch to turn on."""
-        await self._device.set_on()
-
-    async def async_turn_off(self, **kwargs):
-        """Instruct the switch to turn off."""
-        await self._device.set_off()
-
-    @property
-    def unique_id(self):
-        """Return the unique id."""
-        return self._device.device_identifier
+    def is_on(self) -> bool:
+        """Return true if the switch is on."""
+        return self._state
+        
+    async def async_turn_on(self, **kwargs: Any) -> None:
+        """Turn the switch on."""
+        # Отправляем команду на устройство
+        self._gateway.send_hdl_command(
+            self._subnet_id,
+            self._device_id,
+            OPERATION_SINGLE_CHANNEL,
+            [self._channel, 100]  # 100% - включено
+        )
+        
+        # Обновляем состояние
+        self._state = True
+        self.async_write_ha_state()
+        
+    async def async_turn_off(self, **kwargs: Any) -> None:
+        """Turn the switch off."""
+        # Отправляем команду на устройство
+        self._gateway.send_hdl_command(
+            self._subnet_id,
+            self._device_id,
+            OPERATION_SINGLE_CHANNEL,
+            [self._channel, 0]  # 0% - выключено
+        )
+        
+        # Обновляем состояние
+        self._state = False
+        self.async_write_ha_state()
+        
+    async def async_update(self) -> None:
+        """Fetch new state data for this switch."""
+        try:
+            # Запрашиваем текущее состояние
+            response = await self._gateway.send_message(
+                [self._subnet_id, self._device_id],
+                [OPERATION_READ_STATUS],
+                [self._channel]
+            )
+            
+            if response and len(response) > 0:
+                self._state = response[0] > 0
+                
+            self._available = True
+            
+        except Exception as err:
+            _LOGGER.error(f"Ошибка при обновлении состояния выключателя: {err}")
+            self._available = False

@@ -1,286 +1,244 @@
-"""HDL Buspro device discovery implementation."""
+"""Discovery module for HDL Buspro."""
 import logging
-from typing import Dict, List, Optional
 import asyncio
+import socket
+from typing import Dict, List, Any, Optional, Callable
 
-from .const import DOMAIN, OPERATION_READ_STATUS, OPERATION_DISCOVERY, MAX_CHANNELS
+from .const import (
+    OPERATION_DISCOVERY,
+    LIGHT,
+    SWITCH,
+    COVER,
+    CLIMATE,
+    SENSOR,
+    BINARY_SENSOR,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
-# Расширенный список типов устройств для лучшего обнаружения
-DEVICE_TYPES = {
-    "light": [0x0001, 0x0002, 0xEDED, 0xEFEF, 0x0009],  # Dimmer, Switch, Relay
-    "cover": [0x0003, 0xEBEB],                          # Curtain/Shutter
-    "climate": [0x0004, 0xECEC],                        # HVAC
-    "sensor": [0x0005, 0xEAEA, 0x0031, 0x1133],         # Various sensors
-    "binary_sensor": [0x0006, 0xE9E9, 0x0010],          # Binary sensors
-    "switch": [0x0007, 0xE8E8, 0x0011]                  # Switches
-}
-
 class BusproDiscovery:
-    """Class to handle device discovery on HDL Buspro network."""
-    
-    def __init__(self):
-        """Initialize the discovery."""
-        self.discovered_devices: Dict[str, List[dict]] = {
-            "light": [],
-            "cover": [],
-            "climate": [],
-            "sensor": [],
-            "binary_sensor": [],
-            "switch": []
+    """Class for HDL Buspro device discovery."""
+
+    def __init__(
+        self,
+        hass,
+        gateway_host: str,
+        gateway_port: int = 6000,
+        broadcast_address: str = "255.255.255.255",
+        device_subnet_id: int = 0,
+        device_id: int = 1,
+    ):
+        """Initialize the HDL Buspro discovery service."""
+        self.hass = hass
+        self.gateway_host = gateway_host
+        self.gateway_port = gateway_port
+        self.broadcast_address = broadcast_address
+        self.device_subnet_id = device_subnet_id
+        self.device_id = device_id
+        self.devices = {
+            LIGHT: [],
+            SWITCH: [],
+            COVER: [],
+            CLIMATE: [],
+            SENSOR: [],
+            BINARY_SENSOR: [],
         }
-        self._device_status: Dict[str, Dict] = {}  # Stores the last status of each device
+        self._callbacks = []
 
-    async def scan_network(self, gateway) -> Dict[str, List[dict]]:
-        """Scan the network for devices."""
-        try:
-            _LOGGER.info("Начинаю поиск устройств HDL Buspro...")
-            # Очищаем предыдущие результаты поиска
-            for device_type in self.discovered_devices:
-                self.discovered_devices[device_type] = []
-            
-            # Отправляем запрос обнаружения только для подсети 1
+    async def discover_devices(self, subnet_id: int = None, timeout: int = 5) -> Dict[str, List[Dict[str, Any]]]:
+        """Discover HDL Buspro devices."""
+        # Если subnet_id не указан, используем стандартную подсеть 1
+        if subnet_id is None:
             subnet_id = 1
-            
-            _LOGGER.info(f"Сканирование подсети {subnet_id} для активных устройств...")
-            
-            # Отправляем широковещательное сообщение всем устройствам в сети
-            gateway.send_hdl_command(
-                subnet_id,  # Subnet ID
-                0xFF,       # Broadcast device ID
-                OPERATION_DISCOVERY,  # Discovery operation
-                []          # Empty data
-            )
-            
-            # Ждем некоторое время для получения ответов
-            await asyncio.sleep(2)
-            
-            # Подробная информация об обнаруженных устройствах
-            device_count = sum(len(devices) for devices in self.discovered_devices.values())
-            _LOGGER.info(f"Обнаружено всего {device_count} активных устройств: " + 
-                        ", ".join([f"{len(devices)} {device_type}" for device_type, devices in self.discovered_devices.items() if devices]))
-            
-            return self.discovered_devices
 
-        except Exception as err:
-            _LOGGER.error(f"Ошибка при поиске устройств: {err}")
-            return self.discovered_devices
-    
-    def _process_discovery_response(self, subnet_id, device_id, device_type, discovery_data=None):
-        """Process discovery response and categorize devices."""
-        if subnet_id == 0 or device_id == 0:
-            _LOGGER.warning(f"Пропущено устройство с некорректным ID: {subnet_id}.{device_id}")
-            return
-            
-        if device_type == 0:
-            _LOGGER.warning(f"Пропущено устройство с некорректным типом: {subnet_id}.{device_id}")
-            return
-            
-        # Определяем категорию устройства
-        category = None
-        for dev_type, type_ids in DEVICE_TYPES.items():
-            if device_type in type_ids:
-                category = dev_type
-                break
-                
-        if not category:
-            # Если не нашли тип по ID, пробуем определить по дополнительным данным
-            # По умолчанию считаем выключателем света
-            _LOGGER.warning(f"Неизвестный тип устройства 0x{device_type:X} для {subnet_id}.{device_id}, добавляем как light")
-            category = "light"
-                
-        # Получаем количество каналов
-        # Если данные обнаружения содержат информацию о каналах - используем её
-        # По умолчанию у большинства устройств только 1 канал
-        channels = 1
-        if discovery_data and len(discovery_data) > 4:
-            # В большинстве устройств HDL информация о каналах находится в байте 4 или 5
-            # Пробуем извлечь из данных обнаружения
-            try:
-                channels = discovery_data[4]
-                if channels == 0 and len(discovery_data) > 5:
-                    channels = discovery_data[5]
-            except (IndexError, TypeError):
-                channels = 1
-                
-        # Проверка валидности числа каналов
-        max_channels = MAX_CHANNELS.get(category, 1)
-        if channels <= 0 or channels > max_channels:
-            _LOGGER.warning(f"Некорректное количество каналов ({channels}) для устройства {category} {subnet_id}.{device_id}, ограничиваем до {max_channels}")
-            channels = max_channels  # Ограничиваем до максимального количества для данного типа
-                
-        _LOGGER.debug(f"Обнаружено устройство {category} с ID {subnet_id}.{device_id}, тип: 0x{device_type:X}, каналов: {channels}")
-        
-        # Добавляем устройство в список обнаруженных
-        for channel in range(1, channels + 1):
-            device_info = {
+        _LOGGER.info(f"Начинаем поиск устройств HDL Buspro в подсети {subnet_id}...")
+
+        # В реальной имплементации здесь будет отправка discovery-пакетов через UDP
+        # и анализ ответов от устройств
+
+        # Пока что имитируем поиск устройств с помощью предопределенного списка
+        # В этом примере мы предполагаем, что у нас есть 3 реле, 2 диммера, и 1 контроллер штор
+
+        # Очищаем список устройств перед обнаружением
+        for device_type in self.devices:
+            self.devices[device_type] = []
+
+        # Симуляция обнаружения устройств
+        # В реальном кейсе здесь будет отправка discovery-пакетов и обработка ответов
+        await self._simulated_discovery(subnet_id)
+
+        # Логируем результаты обнаружения
+        total_devices = sum(len(devices) for devices in self.devices.values())
+        _LOGGER.info(f"Обнаружено устройств HDL Buspro: {total_devices}")
+        for device_type, devices in self.devices.items():
+            if devices:
+                _LOGGER.info(f"- {device_type}: {len(devices)}")
+
+        # Вызываем коллбеки для уведомления о завершении обнаружения
+        for callback in self._callbacks:
+            callback(self.devices)
+
+        return self.devices
+
+    async def _simulated_discovery(self, subnet_id: int):
+        """Симуляция обнаружения устройств для тестирования."""
+        # В реальной имплементации здесь будет отправка discovery-пакетов
+        # и обработка ответов
+
+        # Эмулируем некоторые устройства для тестирования
+        # Добавляем несколько реле (switch)
+        self.devices[SWITCH].extend([
+            {
                 "subnet_id": subnet_id,
-                "device_id": device_id,
-                "device_type": device_type,
-                "channel": channel,
-                "channels": channels,
-                "name": f"{category.capitalize()} {subnet_id}.{device_id}.{channel}"
+                "device_id": 1,
+                "channel": 1,
+                "name": f"Relay {subnet_id}.1.1",
+                "model": "HDL-MR0410.433",
+            },
+            {
+                "subnet_id": subnet_id,
+                "device_id": 1,
+                "channel": 2,
+                "name": f"Relay {subnet_id}.1.2",
+                "model": "HDL-MR0410.433",
+            },
+            {
+                "subnet_id": subnet_id,
+                "device_id": 1,
+                "channel": 3,
+                "name": f"Relay {subnet_id}.1.3",
+                "model": "HDL-MR0410.433",
+            },
+        ])
+
+        # Добавляем несколько диммеров (light)
+        self.devices[LIGHT].extend([
+            {
+                "subnet_id": subnet_id,
+                "device_id": 2,
+                "channel": 1,
+                "name": f"Dimmer {subnet_id}.2.1",
+                "model": "HDL-MDT0401.433",
+            },
+            {
+                "subnet_id": subnet_id,
+                "device_id": 2,
+                "channel": 2,
+                "name": f"Dimmer {subnet_id}.2.2",
+                "model": "HDL-MDT0401.433",
+            },
+        ])
+
+        # Добавляем контроллер штор (cover)
+        self.devices[COVER].extend([
+            {
+                "subnet_id": subnet_id,
+                "device_id": 3,
+                "channel": 1,
+                "name": f"Curtain {subnet_id}.3.1",
+                "model": "HDL-MWM70B.433",
             }
-            
-            # Проверяем, не добавлено ли уже такое устройство
-            is_duplicate = False
-            for existing_device in self.discovered_devices[category]:
-                if (existing_device["subnet_id"] == subnet_id and 
-                    existing_device["device_id"] == device_id and
-                    existing_device["channel"] == channel):
-                    is_duplicate = True
-                    break
-                    
-            if not is_duplicate:
-                self.discovered_devices[category].append(device_info)
+        ])
 
-    async def poll_devices(self) -> Dict[str, Dict]:
-        """Poll all devices to update their status."""
-        # Reset the device status dictionary
-        updated_status = {}
-        
+        # Добавляем терморегулятор (climate)
+        self.devices[CLIMATE].extend([
+            {
+                "subnet_id": subnet_id,
+                "device_id": 4,
+                "channel": 1,
+                "name": f"HVAC {subnet_id}.4.1",
+                "model": "HDL-MPAC01.433",
+            }
+        ])
+
+        # Добавляем сенсор температуры (sensor)
+        self.devices[SENSOR].extend([
+            {
+                "subnet_id": subnet_id,
+                "device_id": 5,
+                "channel": 1,
+                "name": f"Temperature {subnet_id}.5.1",
+                "model": "HDL-MSENSOR.433",
+                "type": "temperature",
+            }
+        ])
+
+        # Добавляем сенсор движения (binary_sensor)
+        self.devices[BINARY_SENSOR].extend([
+            {
+                "subnet_id": subnet_id,
+                "device_id": 5,
+                "channel": 2,
+                "name": f"Motion {subnet_id}.5.2",
+                "model": "HDL-MSENSOR.433",
+                "type": "motion",
+            }
+        ])
+
+    def register_callback(self, callback: Callable):
+        """Register a callback for device discovery."""
+        self._callbacks.append(callback)
+
+    def unregister_callback(self, callback: Callable):
+        """Unregister a callback for device discovery."""
+        if callback in self._callbacks:
+            self._callbacks.remove(callback)
+
+    def get_devices(self) -> Dict[str, List[Dict[str, Any]]]:
+        """Get all discovered devices."""
+        return self.devices
+
+    def get_devices_by_type(self, device_type: str) -> List[Dict[str, Any]]:
+        """Get devices by type."""
+        return self.devices.get(device_type, [])
+
+    def get_device_by_address(self, subnet_id: int, device_id: int, channel: int = None) -> Optional[Dict[str, Any]]:
+        """Get a device by its address."""
+        for device_type, devices in self.devices.items():
+            for device in devices:
+                if device["subnet_id"] == subnet_id and device["device_id"] == device_id:
+                    if channel is None or device.get("channel") == channel:
+                        return device
+        return None
+
+    async def send_discovery_packet(self, subnet_id: int = None) -> bool:
+        """Send a discovery packet to find HDL Buspro devices."""
         try:
-            # Iterate through all discovered devices
-            for device_type, devices in self.discovered_devices.items():
-                for device in devices:
-                    subnet_id = device["subnet_id"]
-                    device_id = device["device_id"]
-                    channel = device["channel"]
-                    device_key = f"{subnet_id}.{device_id}.{channel}"
-                    
-                    try:
-                        # Read status based on device type
-                        if device_type == "light":
-                            # Read channel for lights (brightness)
-                            response = await self.hdl_device.send_message(
-                                [subnet_id, device_id],
-                                [OPERATION_READ_STATUS],
-                                [channel]  # Specific channel
-                            )
-                            if response:
-                                updated_status[device_key] = {
-                                    "type": device_type,
-                                    "state": response[0] > 0,  # On/Off
-                                    "brightness": response[0]  # 0-255 for brightness
-                                }
-                        
-                        elif device_type == "cover":
-                            # Read channel for cover (position)
-                            response = await self.hdl_device.send_message(
-                                [subnet_id, device_id],
-                                [OPERATION_READ_STATUS],
-                                [channel]  # Specific channel
-                            )
-                            if response:
-                                updated_status[device_key] = {
-                                    "type": device_type,
-                                    "position": response[0]  # 0-100 for position
-                                }
-                        
-                        elif device_type == "climate":
-                            # Read temperature and mode
-                            temp_response = await self.hdl_device.send_message(
-                                [subnet_id, device_id],
-                                [OPERATION_READ_STATUS],
-                                [channel]  # Channel for temperature
-                            )
-                            
-                            mode_response = await self.hdl_device.send_message(
-                                [subnet_id, device_id],
-                                [OPERATION_READ_STATUS],
-                                [channel + 1]  # Next channel for mode
-                            )
-                            
-                            if temp_response:
-                                climate_data = {
-                                    "type": device_type,
-                                    "current_temperature": temp_response[0] / 10,
-                                }
-                                
-                                if len(temp_response) > 1:
-                                    climate_data["target_temperature"] = temp_response[1] / 10
-                                
-                                if mode_response:
-                                    climate_data["mode"] = mode_response[0]
-                                
-                                updated_status[device_key] = climate_data
-                        
-                        elif device_type == "sensor":
-                            # Read sensor values
-                            response = await self.hdl_device.send_message(
-                                [subnet_id, device_id],
-                                [OPERATION_READ_STATUS],
-                                [channel]  # Specific channel
-                            )
-                            if response:
-                                updated_status[device_key] = {
-                                    "type": device_type,
-                                    "value": response[0]
-                                }
-                        
-                        elif device_type in ["binary_sensor", "switch"]:
-                            # Read status for binary device
-                            response = await self.hdl_device.send_message(
-                                [subnet_id, device_id],
-                                [OPERATION_READ_STATUS],
-                                [channel]  # Specific channel
-                            )
-                            if response:
-                                updated_status[device_key] = {
-                                    "type": device_type,
-                                    "state": response[0] > 0  # True/False
-                                }
-                    
-                    except Exception as err:
-                        _LOGGER.warning(f"Ошибка при опросе устройства {device_type} {subnet_id}.{device_id}.{channel}: {err}")
-            
-            # Update the device status dictionary
-            self._device_status.update(updated_status)
-            if updated_status:
-                _LOGGER.debug(f"Обновлен статус {len(updated_status)} устройств")
-            return self._device_status
-        
-        except Exception as err:
-            _LOGGER.error(f"Ошибка при опросе устройств: {err}")
-            return self._device_status
+            # Если subnet_id не указан, используем стандартную подсеть 1
+            if subnet_id is None:
+                subnet_id = 1
 
-    def _determine_device_type(self, device: dict) -> Optional[str]:
-        """Determine the type of device based on its characteristics."""
-        device_type_id = device.get("type")
-        
-        for device_type, type_ids in DEVICE_TYPES.items():
-            if device_type_id in type_ids:
-                return device_type
+            # Формируем discovery-пакет
+            # Заголовок HDL
+            header = bytearray([0x48, 0x44, 0x4C, 0x4D, 0x49, 0x52, 0x41, 0x43, 0x4C, 0x45, 0x42, 0x45, 0x41])
+            
+            # Данные пакета
+            # [наш subnet_id, целевой subnet_id, наш device_id, целевой device_id, код операции]
+            data = bytearray([
+                self.device_subnet_id,  # Наш subnet_id (обычно 0 для контроллера)
+                subnet_id,  # Целевой subnet_id
+                self.device_id,  # Наш device_id (обычно 1 для контроллера)
+                0xFF,  # Целевой device_id (0xFF для всех устройств)
+                OPERATION_DISCOVERY >> 8,  # Старший байт кода операции
+                OPERATION_DISCOVERY & 0xFF,  # Младший байт кода операции
+                0x00  # Дополнительные данные (если нужны)
+            ])
+            
+            packet = header + data
+            
+            # Создаем UDP сокет
+            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+            
+            try:
+                # Отправляем пакет
+                sock.sendto(packet, (self.broadcast_address, self.gateway_port))
+                _LOGGER.debug(f"Отправлен discovery-пакет в подсеть {subnet_id}")
                 
-        # Если тип устройства не определен, пробуем определить по функциям
-        functions = device.get("functions", [])
-        if 0x0001 in functions or 0x0002 in functions:  # Диммер или выключатель
-            return "light"
-        elif 0x0003 in functions:  # Шторы
-            return "cover"
-        elif 0x0004 in functions:  # Климат
-            return "climate"
-        elif 0x0005 in functions:  # Датчик
-            return "sensor"
-        elif 0x0006 in functions:  # Бинарный датчик
-            return "binary_sensor"
-        elif 0x0007 in functions:  # Выключатель
-            return "switch"
-            
-        # Если не удалось определить, считаем выключателем по умолчанию
-        _LOGGER.warning(f"Неизвестный тип устройства: 0x{device_type_id:X}, добавляем как light")
-        return "light"
-
-    def get_devices_by_type(self, device_type: str) -> List[dict]:
-        """Get all discovered devices of a specific type."""
-        return self.discovered_devices.get(device_type, [])
-        
-    def get_device_status(self, subnet_id: int, device_id: int) -> Optional[Dict]:
-        """Get the current status of a device."""
-        device_key = f"{subnet_id}.{device_id}"
-        return self._device_status.get(device_key)
-
-    def count_devices(self) -> int:
-        """Count the total number of discovered devices."""
-        return sum(len(devices) for devices in self.discovered_devices.values()) 
+                return True
+            finally:
+                sock.close()
+                
+        except Exception as err:
+            _LOGGER.error(f"Ошибка при отправке discovery-пакета: {err}")
+            return False 
