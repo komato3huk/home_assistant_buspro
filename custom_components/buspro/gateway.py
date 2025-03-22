@@ -32,63 +32,95 @@ class BusproGateway:
 
     def __init__(
         self,
-        hass: HomeAssistant,
-        discovery: BusproDiscovery,
-        port: int = 10000,
-        poll_interval: int = 30,
-        gateway_host: str = "255.255.255.255",
-        gateway_port: int = 6000,
-    ) -> None:
-        """Initialize the gateway."""
+        hass,
+        host: str,
+        port: int = 6000,
+        timeout: int = 2,
+        poll_interval: int = 60,
+        device_subnet_id: int = 0,
+        device_id: int = 1,
+    ):
+        """Initialize the HDL Buspro gateway."""
         self.hass = hass
-        self.discovery = discovery
-        self.port = port
+        self.gateway_host = host
+        self.gateway_port = port
+        self.timeout = timeout
         self.poll_interval = poll_interval
-        self.gateway_host = gateway_host
-        self.gateway_port = gateway_port
-        self._callbacks = {}
+        self.device_subnet_id = device_subnet_id
+        self.device_id = device_id
+        
+        # Создаем помощник для работы с телеграммами
+        self.telegram_helper = TelegramHelper()
+        
+        # UDP клиент для коммуникации с шлюзом
+        self._udp_client = None
+        
+        # Задача поллинга
         self._polling_task = None
-        self._running = False
-        self._connected = False
-        self._last_update = None
-
-    async def start(self) -> None:
-        """Start gateway."""
-        if not self._polling_task:
-            # Запускаем задачу опроса устройств
-            self._polling_task = asyncio.create_task(
-                self._poll_devices(timedelta(seconds=self.poll_interval))
-            )
-            _LOGGER.debug("Запущена задача опроса устройств")
-            
-            # Запускаем получение данных по UDP
-            self._receive_task = asyncio.create_task(self._receive_data())
-            _LOGGER.debug("Запущена задача получения данных по UDP")
-            
-            self._running = True
-
-    async def stop(self) -> None:
-        """Stop gateway."""
+        
+        # Флаг работы шлюза
         self._running = False
         
+        # Коллбеки и обработчики
+        self._message_callbacks = {}
+        self._message_listeners = []
+        self.discovery_callback = None
+
+    async def start(self):
+        """Start the gateway."""
+        _LOGGER.info(f"Запуск шлюза HDL Buspro {self.gateway_host}:{self.gateway_port}")
+        
+        if self._running:
+            _LOGGER.debug("Шлюз HDL Buspro уже запущен")
+            return
+            
+        try:
+            # Создаем UDP клиент для коммуникации с шлюзом
+            self._udp_client = UDPClient(
+                self.hass.loop,
+                self._handle_received_data,
+                self.gateway_host,
+                self.gateway_port,
+            )
+            
+            # Регистрируем обработчики
+            self._message_callbacks = {}
+            self._message_listeners = []
+            
+            # Запускаем UDP клиент
+            await self._udp_client.start()
+            
+            # Запускаем задачу поллинга, если интервал больше 0
+            if self.poll_interval > 0:
+                self._polling_task = self.hass.loop.create_task(self._polling_loop())
+                
+            self._running = True
+            _LOGGER.info(f"Шлюз HDL Buspro запущен успешно")
+            
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при запуске шлюза HDL Buspro: {e}")
+            raise
+
+    async def stop(self):
+        """Stop the gateway."""
+        _LOGGER.info(f"Остановка шлюза HDL Buspro")
+        
+        if not self._running:
+            _LOGGER.debug("Шлюз HDL Buspro уже остановлен")
+            return
+            
+        # Останавливаем задачу поллинга
         if self._polling_task:
             self._polling_task.cancel()
-            try:
-                await self._polling_task
-            except asyncio.CancelledError:
-                _LOGGER.debug("Задача опроса устройств успешно отменена")
             self._polling_task = None
             
-        if hasattr(self, '_receive_task') and self._receive_task:
-            self._receive_task.cancel()
-            try:
-                await self._receive_task
-            except asyncio.CancelledError:
-                _LOGGER.debug("Задача получения данных успешно отменена")
-            self._receive_task = None
+        # Останавливаем UDP клиент
+        if self._udp_client:
+            await self._udp_client.stop()
+            self._udp_client = None
             
-        self._connected = False
-        _LOGGER.info("Шлюз HDL Buspro остановлен")
+        self._running = False
+        _LOGGER.info(f"Шлюз HDL Buspro остановлен")
 
     @property
     def connected(self) -> bool:
@@ -475,3 +507,168 @@ class BusproGateway:
         except Exception as ex:
             _LOGGER.error(f"Ошибка при отправке телеграммы: {ex}")
             return None 
+
+    async def _handle_received_data(self, data, addr):
+        """Handle received data from UDP socket."""
+        try:
+            # Преобразуем полученные данные в телеграмму
+            telegram = self.telegram_helper.build_telegram_from_udp_data(data)
+            if not telegram:
+                _LOGGER.debug(f"Не удалось разобрать данные от {addr}: {data.hex()}")
+                return
+                
+            source_subnet_id = telegram.get("source_subnet_id")
+            source_device_id = telegram.get("source_device_id")
+            operate_code = telegram.get("operate_code", 0)
+            
+            _LOGGER.debug(f"Получено сообщение с opcode=0x{operate_code:X} от {source_subnet_id}.{source_device_id}: {data.hex()}")
+            
+            # Проверяем, является ли это ответом на запрос обнаружения
+            if operate_code == 0xFA3 and len(telegram.get("data", [])) >= 2:
+                # Получаем тип устройства из данных (первые два байта)
+                device_type = (telegram["data"][0] << 8) | telegram["data"][1]
+                _LOGGER.info(f"Обнаружено устройство HDL: подсеть {source_subnet_id}, ID {source_device_id}, тип 0x{device_type:04X}")
+                
+                # Добавляем устройство в список для discovery
+                if self.discovery_callback:
+                    device_info = {
+                        "subnet_id": source_subnet_id,
+                        "device_id": source_device_id,
+                        "device_type": device_type,
+                        "raw_data": telegram["data"],
+                    }
+                    await self.discovery_callback(device_info)
+            
+            # Обрабатываем ответы на запросы
+            if self._message_callbacks:
+                # Берем копию словаря для безопасного итерирования
+                callbacks_copy = self._message_callbacks.copy()
+                for callback_key, callback_info in callbacks_copy.items():
+                    try:
+                        callback_subnet_id, callback_device_id, callback_operate_code = callback_key
+                        
+                        # Проверяем, соответствует ли полученное сообщение ожидаемому ответу
+                        if (source_subnet_id == callback_subnet_id and 
+                            source_device_id == callback_device_id and 
+                            operate_code == callback_operate_code):
+                            
+                            # Извлекаем callback
+                            callback, future, timeout_handle = callback_info
+                            
+                            # Отменяем таймер ожидания
+                            if timeout_handle:
+                                timeout_handle.cancel()
+                                
+                            # Удаляем callback из словаря
+                            self._message_callbacks.pop(callback_key, None)
+                            
+                            # Вызываем callback
+                            if callback:
+                                response = callback(telegram)
+                                # Если есть future, устанавливаем результат
+                                if future and not future.done():
+                                    future.set_result(response)
+                    except Exception as e:
+                        _LOGGER.error(f"Ошибка при обработке callback: {e}")
+            
+            # Обновляем обработчик сообщений для всех зарегистрированных слушателей
+            for listener in self._message_listeners:
+                try:
+                    await listener(telegram)
+                except Exception as e:
+                    _LOGGER.error(f"Ошибка при обработке слушателя сообщений: {e}")
+                    
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при обработке полученных данных: {e}")
+
+    async def register_for_discovery(self, callback):
+        """Register callback for device discovery."""
+        self.discovery_callback = callback
+        _LOGGER.info(f"Зарегистрирован обработчик обнаружения устройств")
+
+    async def send_message(self, target_address, operation_code, data=None, timeout=2.0):
+        """Send message to the HDL Buspro gateway."""
+        if not self._udp_client:
+            _LOGGER.error(f"UDP клиент не инициализирован")
+            return None
+            
+        try:
+            # Создаем телеграмму
+            telegram = {
+                "subnet_id": target_address[0],
+                "device_id": target_address[1],
+                "source_subnet_id": self.device_subnet_id,
+                "source_device_id": self.device_id,
+                "operate_code": (operation_code[0] << 8) | operation_code[1],
+                "data": data if data is not None else [],
+            }
+            
+            # Если это сообщение широковещательного типа или команда без ответа,
+            # просто отправляем сообщение без ожидания ответа
+            if target_address[1] == 0xFF or operation_code[0] == 0:
+                buffer = self.telegram_helper.build_send_buffer(telegram)
+                if buffer:
+                    _LOGGER.debug(f"Отправка широковещательного сообщения: subnet_id={target_address[0]}, "
+                                f"device_id={target_address[1]}, opcode=0x{telegram['operate_code']:04X}")
+                    await self._udp_client.send(buffer, self.gateway_host, self.gateway_port)
+                    return {"status": "sent"}
+            
+            # Генерируем уникальный ключ для callback
+            callback_key = (target_address[0], target_address[1], telegram["operate_code"])
+            
+            # Создаем future для получения результата
+            future = asyncio.Future()
+            
+            # Создаем функцию обработки ответа
+            def handle_response(response_telegram):
+                # Преобразуем ответ в нужный формат
+                return {
+                    "subnet_id": response_telegram.get("source_subnet_id"),
+                    "device_id": response_telegram.get("source_device_id"),
+                    "operate_code": response_telegram.get("operate_code"),
+                    "data": response_telegram.get("data", []),
+                }
+            
+            # Создаем таймер для таймаута
+            timeout_handle = self.hass.loop.call_later(
+                timeout, 
+                self._handle_timeout, 
+                callback_key, 
+                future
+            )
+            
+            # Регистрируем callback
+            self._message_callbacks[callback_key] = (handle_response, future, timeout_handle)
+            
+            # Отправляем сообщение
+            buffer = self.telegram_helper.build_send_buffer(telegram)
+            if not buffer:
+                _LOGGER.error(f"Не удалось создать буфер отправки для телеграммы: {telegram}")
+                self._message_callbacks.pop(callback_key, None)
+                if timeout_handle:
+                    timeout_handle.cancel()
+                return None
+                
+            _LOGGER.debug(f"Отправка сообщения: subnet_id={target_address[0]}, "
+                        f"device_id={target_address[1]}, opcode=0x{telegram['operate_code']:04X}")
+            await self._udp_client.send(buffer, self.gateway_host, self.gateway_port)
+            
+            # Ожидаем результат с таймаутом
+            try:
+                return await asyncio.wait_for(future, timeout)
+            except asyncio.TimeoutError:
+                _LOGGER.warning(f"Таймаут при ожидании ответа от {target_address[0]}.{target_address[1]}")
+                return {"status": "timeout"}
+                
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при отправке сообщения: {e}")
+            return None
+
+    def _handle_timeout(self, callback_key, future):
+        """Handle timeout for message response."""
+        # Удаляем callback
+        self._message_callbacks.pop(callback_key, None)
+        
+        # Устанавливаем результат как таймаут, если future еще не выполнен
+        if not future.done():
+            future.set_result({"status": "timeout"}) 

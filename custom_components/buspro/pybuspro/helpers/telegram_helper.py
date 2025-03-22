@@ -2,45 +2,74 @@
 from typing import Dict, Any, Tuple
 import traceback
 from struct import *
+import logging
+import binascii
 
 from .enums import DeviceType
 from .generics import Generics
 from ..core.telegram import Telegram
 from ..devices.control import *
 
+_LOGGER = logging.getLogger(__name__)
 
 class TelegramHelper:
-    """Helper class for HDL Buspro telegrams."""
+    """Helper class for working with HDL Buspro telegrams."""
     
     def build_telegram_from_udp_data(self, data: bytes, address: Tuple[str, int]) -> Dict[str, Any]:
         """Build telegram dictionary from UDP data."""
-        # Basic validation
-        if not data or len(data) < 7:
-            return {}
+        if not data or len(data) < 15:
+            _LOGGER.error(f"Неверный формат данных UDP: {data}, длина: {len(data) if data else 0}")
+            return None
+
+        try:
+            header = data[2:12].decode('ascii')
+            if header != "HDLMIRACLE":
+                _LOGGER.warning(f"Неверный заголовок пакета: {header}, полный пакет: {binascii.hexlify(data).decode()}")
+                return None
             
-        # Check header
-        if data[0] != 0xAA or data[1] != 0xAA:
-            return {}
+            _LOGGER.debug(f"Обработка UDP пакета: {binascii.hexlify(data).decode()}")
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при чтении заголовка пакета: {e}, данные: {binascii.hexlify(data).decode()}")
+            return None
+
+        telegram = {}
+        try:
+            telegram["source_subnet_id"] = data[12]
+            telegram["source_device_id"] = data[13]
             
-        # Parse header
-        subnet_id = data[2]
-        device_id = data[3]
-        operate_code = (data[4] << 8) | data[5]
-        data_length = data[6]
-        
-        # Parse data
-        payload = list(data[7:7+data_length]) if data_length > 0 else []
-        
-        # Create telegram
-        telegram = {
-            "source_address": address,
-            "subnet_id": subnet_id,
-            "device_id": device_id,
-            "operate_code": operate_code,
-            "data": payload
-        }
-        
-        return telegram
+            telegram["operate_code"] = (data[14] << 8) | data[15]
+            
+            telegram["target_subnet_id"] = data[16]
+            telegram["target_device_id"] = data[17]
+            
+            data_length = len(data) - 20
+            if data_length > 0:
+                telegram["data"] = list(data[20:20 + data_length])
+            else:
+                telegram["data"] = []
+                
+            _LOGGER.debug(
+                f"Telegram: Источник: {telegram['source_subnet_id']}.{telegram['source_device_id']}, "
+                f"Код: 0x{telegram['operate_code']:04X}, "
+                f"Цель: {telegram['target_subnet_id']}.{telegram['target_device_id']}, "
+                f"Данные: {telegram['data']}"
+            )
+            
+            if telegram["operate_code"] == 0xFA3:
+                device_type = 0
+                if len(telegram["data"]) >= 2:
+                    device_type = (telegram["data"][0] << 8) | telegram["data"][1]
+                _LOGGER.info(
+                    f"Обнаружено устройство: {telegram['source_subnet_id']}.{telegram['source_device_id']}, "
+                    f"Тип: 0x{device_type:04X}, "
+                    f"Данные: {telegram['data']}"
+                )
+                
+            return telegram
+            
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при разборе телеграммы: {e}, данные: {binascii.hexlify(data).decode()}")
+            return None
 
     @staticmethod
     def replace_none_values(telegram: Telegram):
@@ -57,88 +86,50 @@ class TelegramHelper:
     # noinspection SpellCheckingInspection
     def build_send_buffer(self, telegram):
         """Build buffer from telegram for sending."""
-        # If the telegram is a dictionary (legacy format), convert to bytes
-        if isinstance(telegram, dict):
-            subnet_id = telegram.get("subnet_id", 0)
-            device_id = telegram.get("device_id", 0)
-            operate_code = telegram.get("operate_code", 0)
+        if not isinstance(telegram, dict):
+            _LOGGER.error(f"Неверный формат телеграммы: {telegram}")
+            return None
+            
+        try:
+            if "subnet_id" not in telegram or "device_id" not in telegram:
+                _LOGGER.error(f"В телеграмме отсутствуют обязательные поля: {telegram}")
+                return None
+                
+            operate_code = telegram.get("operate_code", 0x0000)
             data = telegram.get("data", [])
             
-            # Build packet
-            packet = bytearray()
+            buffer = bytearray()
             
-            # Header
-            packet.extend([0xAA, 0xAA])
+            buffer.extend(b'\x0A\x00\x50\x0A\x48\x44\x4C\x4D\x49\x52\x41\x43\x4C\x45')
             
-            # Address
-            packet.append(subnet_id)
-            packet.append(device_id)
+            buffer.append(telegram.get("source_subnet_id", 0x01))
+            buffer.append(telegram.get("source_device_id", 0x01))
             
-            # Operation code (2 bytes)
-            packet.append((operate_code >> 8) & 0xFF)
-            packet.append(operate_code & 0xFF)
+            buffer.append((operate_code >> 8) & 0xFF)
+            buffer.append(operate_code & 0xFF)
             
-            # Data length
-            packet.append(len(data))
+            buffer.append(telegram["subnet_id"])
+            buffer.append(telegram["device_id"])
             
-            # Data
-            packet.extend(data)
+            data_length = len(data)
+            buffer.append(data_length)
             
-            # CRC (simple sum of all bytes)
-            crc = sum(packet) & 0xFF
-            packet.append(crc)
+            if data_length > 0:
+                buffer.extend(data)
+                
+            crc = 0
+            for i in range(14, len(buffer)):
+                crc += buffer[i]
+            buffer.append((crc >> 8) & 0xFF)
+            buffer.append(crc & 0xFF)
             
-            return bytes(packet)
+            _LOGGER.debug(f"Отправка телеграммы: {binascii.hexlify(buffer).decode()}")
             
-        # Handle Telegram object (newer format)
-        send_buf = bytearray([192, 168, 1, 15])
-        # noinspection SpellCheckingInspection
-        send_buf.extend('HDLMIRACLE'.encode())
-        send_buf.append(0xAA)
-        send_buf.append(0xAA)
-
-        if telegram is None:
+            return buffer
+            
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при создании буфера отправки: {e}, телеграмма: {telegram}")
             return None
-
-        if telegram.payload is None:
-            telegram.payload = []
-
-        length_of_data_package = 11 + len(telegram.payload)
-        send_buf.append(length_of_data_package)
-
-        if telegram.source_address is not None:
-            sender_subnet_id, sender_device_id = telegram.source_address
-        else:
-            sender_subnet_id = 200
-            sender_device_id = 200
-
-        send_buf.append(sender_subnet_id)
-        send_buf.append(sender_device_id)
-
-        if telegram.source_device_type is not None:
-            source_device_type_hex = telegram.source_device_type.value
-            send_buf.append(source_device_type_hex[0])
-            send_buf.append(source_device_type_hex[1])
-        else:
-            send_buf.append(0)
-            send_buf.append(0)
-
-        operate_code_hex = telegram.operate_code.value
-        send_buf.append(operate_code_hex[0])
-        send_buf.append(operate_code_hex[1])
-
-        target_subnet_id, target_device_id = telegram.target_address
-        send_buf.append(target_subnet_id)
-        send_buf.append(target_device_id)
-
-        for byte in telegram.payload:
-            send_buf.append(byte)
-
-        crc_0, crc_1 = self._calculate_crc(length_of_data_package, send_buf)
-        send_buf.append(crc_0)
-        send_buf.append(crc_1)
-
-        return send_buf
 
     def _calculate_crc(self, length_of_data_package, send_buf):
         crc_buf_length = length_of_data_package - 2

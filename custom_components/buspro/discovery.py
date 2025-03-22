@@ -47,6 +47,34 @@ class BusproDiscovery:
         self.unknown_device_types = set()
         self._callbacks = []
 
+    async def add_callback(self, callback):
+        """Register a callback function to be called when discovery is complete."""
+        self._callbacks.append(callback)
+        _LOGGER.debug(f"Добавлен callback для обнаружения устройств (всего: {len(self._callbacks)})")
+
+    async def process_device_discovery(self, device_info):
+        """Process device discovery info received from gateway."""
+        try:
+            subnet_id = device_info.get("subnet_id")
+            device_id = device_info.get("device_id")
+            device_type = device_info.get("device_type")
+            
+            _LOGGER.info(f"Обработка обнаруженного устройства: {subnet_id}.{device_id}, тип 0x{device_type:04X}")
+            
+            # Получаем модель и название по типу устройства
+            model = self._get_model_by_type(device_type)
+            name = f"{model} {subnet_id}.{device_id}"
+            
+            # Классифицируем устройство и добавляем его во внутренний словарь устройств
+            device_info = self._classify_device_by_type(device_type, subnet_id, device_id, model, name)
+            
+            # Если это новое уникальное устройство, уведомляем об этом
+            device_key = (subnet_id, device_id, device_type)
+            _LOGGER.info(f"Добавлено новое устройство: {name} ({subnet_id}.{device_id}), тип 0x{device_type:04X}")
+            
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при обработке информации об обнаруженном устройстве: {e}")
+
     async def discover_devices(self, subnet_id: int = None, timeout: int = 5) -> Dict[str, List[Dict[str, Any]]]:
         """Discover HDL Buspro devices."""
         # Если subnet_id не указан, используем стандартную подсеть 1
@@ -59,22 +87,39 @@ class BusproDiscovery:
         for device_type in self.devices:
             self.devices[device_type] = []
 
+        # Регистрируем обработчик обнаружения устройств в шлюзе
+        await self.gateway.register_for_discovery(self.process_device_discovery)
+        
         # Запускаем реальное обнаружение устройств
         try:
-            # Отправляем запрос обнаружения для каждой подсети от 1 до 254
-            for current_subnet in range(1, 255):
+            # Отправляем запрос обнаружения для каждой подсети
+            # Если указана конкретная подсеть, то только для неё
+            # Иначе перебираем все подсети от 1 до 10 (чтобы не перегружать сеть)
+            subnets_to_scan = [subnet_id] if subnet_id else list(range(1, 11))
+            
+            _LOGGER.info(f"Сканирование подсетей: {subnets_to_scan}")
+            
+            # Отправляем запросы на обнаружение во все подсети
+            for current_subnet in subnets_to_scan:
                 success = await self.send_discovery_packet(current_subnet)
                 if success:
                     _LOGGER.debug(f"Запрос обнаружения отправлен в подсеть {current_subnet}")
                 else:
                     _LOGGER.warning(f"Не удалось отправить запрос обнаружения в подсеть {current_subnet}")
                 
-                # Делаем небольшую паузу между запросами
-                await asyncio.sleep(0.1)
+                # Делаем паузу между запросами, чтобы не пропустить ответы
+                await asyncio.sleep(0.2)
             
-            # Даем время устройствам ответить
-            _LOGGER.info(f"Ожидаем ответы от устройств ({timeout} сек)...")
-            await asyncio.sleep(timeout)
+            # Повторно отправляем запросы для надежности
+            for current_subnet in subnets_to_scan:
+                await self.send_discovery_packet(current_subnet)
+                await asyncio.sleep(0.2)
+
+            # Даем время устройствам ответить и обработаться в системе
+            _LOGGER.info(f"Ожидаем ответы от устройств ({timeout} сек). Обнаруженные устройства будут записаны в лог...")
+            for i in range(timeout):
+                await asyncio.sleep(1)
+                _LOGGER.debug(f"Ожидание ответов: прошло {i+1} сек из {timeout}...")
         
         except Exception as e:
             _LOGGER.error(f"Ошибка при обнаружении устройств: {e}")
@@ -82,10 +127,6 @@ class BusproDiscovery:
             _LOGGER.warning("Использую симуляцию обнаружения устройств в качестве запасного варианта")
             await self._simulated_discovery(subnet_id)
 
-        # Логируем результаты обнаружения
-        total_devices = sum(len(devices) for devices in self.devices.values())
-        _LOGGER.info(f"Обнаружено устройств HDL Buspro: {total_devices}")
-        
         # Подробный вывод всех обнаруженных ID устройств
         _LOGGER.info("=" * 50)
         _LOGGER.info("СПИСОК ВСЕХ ОБНАРУЖЕННЫХ УСТРОЙСТВ HDL BUSPRO:")
@@ -113,6 +154,10 @@ class BusproDiscovery:
             for device_type in sorted(self.unknown_device_types):
                 _LOGGER.info(f"Тип: 0x{device_type:04X} - Добавьте эту информацию разработчику")
             _LOGGER.info("=" * 50)
+        
+        # Логируем результаты обнаружения
+        total_devices = sum(len(devices) for devices in self.devices.values())
+        _LOGGER.info(f"Обнаружено устройств HDL Buspro: {total_devices}")
         
         for device_type, devices in self.devices.items():
             if devices:
@@ -272,47 +317,27 @@ class BusproDiscovery:
                         return device
         return None
 
-    async def send_discovery_packet(self, subnet_id: int = None) -> bool:
-        """Send a discovery packet to find HDL Buspro devices."""
+    async def send_discovery_packet(self, subnet_id: int) -> bool:
+        """Send discovery packet to find devices in subnet."""
         try:
-            # Если subnet_id не указан, используем стандартную подсеть 1
-            if subnet_id is None:
-                subnet_id = 1
+            # Код операции для запроса обнаружения устройств
+            operate_code = 0x000E  # "Device Discovery" в HDL Buspro
 
-            # Формируем discovery-пакет
-            # Заголовок HDL
-            header = bytearray([0x48, 0x44, 0x4C, 0x4D, 0x49, 0x52, 0x41, 0x43, 0x4C, 0x45, 0x42, 0x45, 0x41])
-            
-            # Данные пакета
-            # [наш subnet_id, целевой subnet_id, наш device_id, целевой device_id, код операции]
-            data = bytearray([
-                self.device_subnet_id,  # Наш subnet_id (обычно 0 для контроллера)
-                subnet_id,  # Целевой subnet_id
-                self.device_id,  # Наш device_id (обычно 1 для контроллера)
-                0xFF,  # Целевой device_id (0xFF для всех устройств)
-                OPERATION_DISCOVERY >> 8,  # Старший байт кода операции
-                OPERATION_DISCOVERY & 0xFF,  # Младший байт кода операции
-                0x00  # Дополнительные данные (если нужны)
-            ])
-            
-            packet = header + data
-            
-            # Создаем UDP сокет
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            
-            try:
-                # Отправляем пакет
-                sock.sendto(packet, (self.broadcast_address, self.gateway_port))
-                _LOGGER.debug(f"Отправлен discovery-пакет в подсеть {subnet_id}")
-                
-                return True
-            finally:
-                sock.close()
-                
-        except Exception as err:
-            _LOGGER.error(f"Ошибка при отправке discovery-пакета: {err}")
-            return False 
+            # Данные команды (пустые для запроса обнаружения)
+            data = []
+
+            # Отправляем запрос на сеть
+            _LOGGER.debug(f"Отправка запроса обнаружения для подсети {subnet_id}")
+            result = await self.gateway.send_message(
+                [subnet_id, 0xFF, 0, 0],  # target_address - broadcast для всей подсети
+                [operate_code >> 8, operate_code & 0xFF],  # операция обнаружения
+                data,  # пустые данные
+            )
+
+            return result is not None
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при отправке запроса обнаружения: {e}")
+            return False
 
     def _process_discovery_response(self, subnet_id: int, device_id: int, device_type: int, data: list) -> None:
         """Process a discovery response from a device.
