@@ -41,7 +41,6 @@ from .const import (
 )
 from .discovery import BusproDiscovery
 from .gateway import BusproGateway
-from .pybuspro.core.hdl_device import HDLDevice
 
 _LOGGER = logging.getLogger(__name__)
 

@@ -27,7 +27,6 @@ from .const import (
     DEFAULT_GATEWAY_PORT,
 )
 from .discovery import BusproDiscovery
-from .pybuspro.core.hdl_device import HDLDevice
 
 _LOGGER = logging.getLogger(__name__)
 

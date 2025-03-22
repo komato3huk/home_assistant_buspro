@@ -31,6 +31,14 @@ DEVICE_TYPE_COVER = "cover"
 DEVICE_TYPE_CLIMATE = "climate"
 DEVICE_TYPE_SENSOR = "sensor"
 
+# Platform constants
+LIGHT = "light"
+COVER = "cover"
+CLIMATE = "climate"
+SENSOR = "sensor"
+BINARY_SENSOR = "binary_sensor"
+SWITCH = "switch"
+
 # Configuration constants
 CONF_DEVICE_SUBNET_ID = "device_subnet_id"
 CONF_DEVICE_ID = "device_id"
