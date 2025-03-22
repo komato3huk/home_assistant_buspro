@@ -335,3 +335,6 @@ class BusproDiscovery:
                 
             self.devices[device_type].append(device_info)
             _LOGGER.debug(f"Добавлено устройство {device_type}: {device_info['name']}") 
+
+# Создаем альтернативное имя для BusproDiscovery для обратной совместимости
+DeviceDiscovery = BusproDiscovery 
