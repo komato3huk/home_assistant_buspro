@@ -72,6 +72,9 @@ class BusproGateway:
         self._callbacks = {}
         self._message_listeners = []
         self.discovery_callback = None
+        
+        # Добавляем атрибут для хранения ответов от устройств
+        self._pending_telegrams = {}
 
     async def start(self):
         """Start the gateway."""
@@ -252,7 +255,10 @@ class BusproGateway:
                 if device_key in self._callbacks:
                     for callback_func in self._callbacks[device_key]:
                         try:
-                            callback_func(subnet_id, device_id, channel, value)
+                            if asyncio.iscoroutinefunction(callback_func):
+                                await callback_func(subnet_id, device_id, channel, value)
+                            else:
+                                callback_func(subnet_id, device_id, channel, value)
                         except Exception as ex:
                             _LOGGER.error(f"Ошибка в обратном вызове для {device_key}: {ex}")
                 
@@ -430,103 +436,86 @@ class BusproGateway:
             _LOGGER.error(f"Ошибка при отправке команды: {ex}")
             return False
 
-    async def send_telegram(self, telegram):
-        """Send a telegram to the HDL Buspro bus."""
+    async def send_telegram(self, telegram: Dict[str, Any]) -> Dict[str, Any]:
+        """Send telegram to HDL Buspro device and return the response.
+        
+        Args:
+            telegram: Telegram dictionary
+            
+        Returns:
+            Dictionary with response data or None on error
+        """
         try:
-            if not telegram:
-                _LOGGER.error("Невозможно отправить пустую телеграмму")
+            # Проверка параметров
+            if not telegram or not isinstance(telegram, dict):
+                _LOGGER.error("Invalid telegram format")
                 return None
                 
-            # Извлекаем данные из телеграммы
-            subnet_id = telegram.get("subnet_id")
-            device_id = telegram.get("device_id")
-            operate_code = telegram.get("operate_code")
-            data = telegram.get("data", [])
+            # Добавление отсутствующих полей
+            if "source_subnet_id" not in telegram:
+                telegram["source_subnet_id"] = self.device_subnet_id
+            if "source_device_id" not in telegram:
+                telegram["source_device_id"] = self.device_id
+                
+            # Логирование действий
+            _LOGGER.debug(
+                f"Отправка телеграммы: код 0x{telegram.get('operate_code', 0):04X}, "
+                f"цель: {telegram.get('target_subnet_id', 0)}.{telegram.get('target_device_id', 0)}, "
+                f"через шлюз {self.gateway_host}:{self.gateway_port}"
+            )
             
-            if subnet_id is None or device_id is None or operate_code is None:
-                _LOGGER.error("В телеграмме отсутствуют обязательные поля")
+            # Добавление в пул ожидающих ответа
+            # Идентификатор запроса для отслеживания
+            request_id = f"{telegram.get('target_subnet_id', 0)}.{telegram.get('target_device_id', 0)}.{telegram.get('operate_code', 0)}"
+            response_future = self.hass.loop.create_future()
+            
+            # Ключ тайм-аута для отмены запроса по тайм-ауту
+            timeout_handle = self.hass.loop.call_later(
+                self.timeout, self._handle_telegram_timeout, request_id, response_future
+            )
+            
+            # Сохранение ожидающего запроса
+            self._pending_telegrams[request_id] = {
+                "future": response_future,
+                "timeout_handle": timeout_handle,
+                "sent_at": time.time()
+            }
+            
+            # Отправка телеграммы через UDP клиент
+            success = await self._udp_client.send_telegram(telegram)
+            
+            if not success:
+                # Очистка при неудаче отправки
+                self._cleanup_pending_telegram(request_id)
+                _LOGGER.error(f"Failed to send telegram to {telegram.get('target_subnet_id', 0)}.{telegram.get('target_device_id', 0)}")
+                return None
+            
+            # Ожидание ответа
+            try:
+                response = await asyncio.wait_for(response_future, timeout=self.timeout)
+                return response
+            except asyncio.TimeoutError:
+                _LOGGER.warning(f"Timeout waiting for response from {telegram.get('target_subnet_id', 0)}.{telegram.get('target_device_id', 0)}")
                 return None
                 
-            # Специальная обработка для различных типов устройств
-            # Для климат-контроля
-            if operate_code == 0x1944:  # ReadFloorHeatingStatus
-                _LOGGER.debug(f"Запрос статуса устройства климат-контроля {subnet_id}.{device_id}")
-                # Для этого кода не нужны дополнительные данные
-                
-            elif operate_code == 0x1946:  # ControlFloorHeatingStatus
-                _LOGGER.debug(f"Установка статуса устройства климат-контроля {subnet_id}.{device_id}: {data}")
-                # data должен содержать temperature_type, current_temperature, 
-                # status, mode, normal_temp, day_temp, night_temp, away_temp
-                
-            # Дальнейшая обработка для других типов устройств может быть добавлена здесь
-                
-            # Отправляем команду с использованием send_hdl_command
-            # Для кода операции (2 байта) делим на старший и младший байт
-            op_high = (operate_code >> 8) & 0xFF
-            op_low = operate_code & 0xFF
+        except Exception as e:
+            _LOGGER.error(f"Error sending telegram: {e}")
+            import traceback
+            _LOGGER.error(traceback.format_exc())
+            return None
             
-            # Формируем заголовок HDL сообщения
-            header = bytearray([0x48, 0x44, 0x4C, 0x4D, 0x49, 0x52, 0x41, 0x43, 0x4C, 0x45, 0x42, 0x45, 0x41])
-            
-            # Подготавливаем команду
-            command = bytearray([
-                0x00,  # Наш subnet_id (всегда 0 для контроллера)
-                subnet_id,  # Subnet ID получателя
-                0x01,  # Наш device ID (всегда 1 для контроллера)
-                device_id,  # Device ID получателя
-                op_high,  # Старший байт кода операции
-                op_low   # Младший байт кода операции
-            ])
-            
-            # Добавляем дополнительные данные
-            if data:
-                if isinstance(data, list):
-                    command.extend(data)
-                else:
-                    command.append(data)
-            
-            # Формируем полное сообщение
-            message = header + command
-            
-            # Отправляем сообщение
-            sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-            sock.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
-            
-            target_ip = self.gateway_host if hasattr(self, 'gateway_host') else "255.255.255.255"
-            target_port = self.gateway_port if hasattr(self, 'gateway_port') else 6000
-            
-            _LOGGER.debug(f"Отправка сообщения на {target_ip}:{target_port} для устройства {subnet_id}.{device_id}, команда: 0x{operate_code:04X}")
-            
-            sock.sendto(message, (target_ip, target_port))
-            _LOGGER.debug(f"Отправлена телеграмма для {subnet_id}.{device_id}, код операции: 0x{operate_code:04X}, данные: {data}")
-            
-            sock.close()
-            
-            # Для Floor Heating возвращаем эмуляцию ответа с типовыми значениями
-            # Это нужно для начальной отладки, потом нужно будет заменить на реальный ответ от устройства
-            if operate_code == 0x1944 and subnet_id == 1 and device_id == 4:
-                # Эмулируем ответ от устройства климат-контроля
-                _LOGGER.debug(f"Эмулируем ответ от устройства климат-контроля {subnet_id}.{device_id}")
-                return {
-                    "success": True,
-                    "data": [
-                        1,        # temperature_type (Celsius)
-                        220,      # current_temperature (22.0°C)
-                        1,        # status (вкл)
-                        1,        # mode (Normal)
-                        240,      # normal_temperature (24.0°C)
-                        250,      # day_temperature (25.0°C)
-                        200,      # night_temperature (20.0°C)
-                        180       # away_temperature (18.0°C)
-                    ]
-                }
-            
-            # Для других случаев возвращаем успешный результат с передачей исходных данных
-            return {"success": True, "data": data}
-            
-        except Exception as ex:
-            _LOGGER.error(f"Ошибка при отправке телеграммы: {ex}")
-            return None 
+    def _handle_telegram_timeout(self, request_id, future):
+        """Handle telegram request timeout."""
+        if not future.done():
+            future.set_exception(asyncio.TimeoutError(f"Telegram request {request_id} timed out"))
+        self._cleanup_pending_telegram(request_id)
+        
+    def _cleanup_pending_telegram(self, request_id):
+        """Clean up pending telegram request."""
+        if request_id in self._pending_telegrams:
+            pending = self._pending_telegrams.pop(request_id)
+            if "timeout_handle" in pending and pending["timeout_handle"]:
+                pending["timeout_handle"].cancel()
 
     async def _handle_received_data(self, data, addr):
         """Handle received data from UDP socket."""
@@ -614,7 +603,10 @@ class BusproGateway:
                             # Вызываем callback
                             if callback:
                                 try:
-                                    response = callback(telegram)
+                                    if asyncio.iscoroutinefunction(callback):
+                                        response = await callback(telegram)
+                                    else:
+                                        response = callback(telegram)
                                     # Если есть future, устанавливаем результат
                                     if future and not future.done():
                                         future.set_result(response)
@@ -642,7 +634,10 @@ class BusproGateway:
                                     value = telegram["data"][0]
                             
                             # Вызываем callback с полученными данными
-                            await callback(source_subnet_id, source_device_id, channel, value, telegram)
+                            if asyncio.iscoroutinefunction(callback):
+                                await callback(source_subnet_id, source_device_id, channel, value, telegram)
+                            else:
+                                callback(source_subnet_id, source_device_id, channel, value, telegram)
                             
                         except Exception as e:
                             _LOGGER.error(f"Ошибка при вызове callback для устройства {callback_key}: {e}")
