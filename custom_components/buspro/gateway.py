@@ -25,6 +25,7 @@ from .const import (
 )
 
 from .pybuspro.transport import UDPClient
+from .pybuspro.transport.network_interface import NetworkInterface
 from .pybuspro.helpers import TelegramHelper
 
 from .discovery import BusproDiscovery
@@ -59,6 +60,9 @@ class BusproGateway:
         # UDP клиент для коммуникации с шлюзом
         self._udp_client = None
         
+        # Сетевой интерфейс для отправки телеграмм
+        self._network_interface = None
+        
         # Задача поллинга
         self._polling_task = None
         
@@ -85,12 +89,22 @@ class BusproGateway:
             return
             
         try:
-            # Создаем UDP клиент для коммуникации с шлюзом
+            # Создаем UDP клиент и сетевой интерфейс для коммуникации с шлюзом
             self._udp_client = UDPClient(
-                self.hass.loop,
-                self._handle_received_data,
+                self,  # передаем себя как родителя
                 self.gateway_host,
+                self._handle_received_data,
                 self.gateway_port,
+            )
+            
+            # Инициализируем сетевой интерфейс
+            self._network_interface = NetworkInterface(
+                self,  # передаем себя как родителя
+                (self.gateway_host, self.gateway_port),
+                self.device_subnet_id,
+                self.device_id,
+                self.gateway_host,
+                self.gateway_port
             )
             
             # Регистрируем обработчики
@@ -99,6 +113,9 @@ class BusproGateway:
             
             # Запускаем UDP клиент
             await self._udp_client.start()
+            
+            # Запускаем сетевой интерфейс
+            await self._network_interface.start()
             
             # Запускаем задачу поллинга, если интервал больше 0
             if self.poll_interval > 0:
@@ -123,6 +140,11 @@ class BusproGateway:
         if self._polling_task:
             self._polling_task.cancel()
             self._polling_task = None
+            
+        # Останавливаем сетевой интерфейс
+        if self._network_interface:
+            await self._network_interface.stop()
+            self._network_interface = None
             
         # Останавливаем UDP клиент
         if self._udp_client:
@@ -436,37 +458,15 @@ class BusproGateway:
             _LOGGER.error(f"Ошибка при отправке команды: {ex}")
             return False
 
-    async def send_telegram(self, telegram: Dict[str, Any]) -> Dict[str, Any]:
-        """Send telegram to HDL Buspro device and return the response.
-        
-        Args:
-            telegram: Telegram dictionary
-            
-        Returns:
-            Dictionary with response data or None on error
-        """
+    async def send_telegram(self, telegram):
+        """Отправить телеграмму HDL Buspro и ожидать ответа."""
         try:
-            # Проверка параметров
-            if not telegram or not isinstance(telegram, dict):
-                _LOGGER.error("Invalid telegram format")
-                return None
-                
-            # Добавление отсутствующих полей
-            if "source_subnet_id" not in telegram:
-                telegram["source_subnet_id"] = self.device_subnet_id
-            if "source_device_id" not in telegram:
-                telegram["source_device_id"] = self.device_id
-                
-            # Логирование действий
-            _LOGGER.debug(
-                f"Отправка телеграммы: код 0x{telegram.get('operate_code', 0):04X}, "
-                f"цель: {telegram.get('target_subnet_id', 0)}.{telegram.get('target_device_id', 0)}, "
-                f"через шлюз {self.gateway_host}:{self.gateway_port}"
-            )
-            
-            # Добавление в пул ожидающих ответа
-            # Идентификатор запроса для отслеживания
+            # Создаем уникальный ID запроса
             request_id = f"{telegram.get('target_subnet_id', 0)}.{telegram.get('target_device_id', 0)}.{telegram.get('operate_code', 0)}"
+            
+            _LOGGER.debug(f"Отправка телеграммы ID={request_id}: {telegram}")
+            
+            # Создаем future для ожидания ответа
             response_future = self.hass.loop.create_future()
             
             # Ключ тайм-аута для отмены запроса по тайм-ауту
@@ -481,8 +481,8 @@ class BusproGateway:
                 "sent_at": time.time()
             }
             
-            # Отправка телеграммы через UDP клиент
-            success = await self._udp_client.send_telegram(telegram)
+            # Отправка телеграммы через сетевой интерфейс, а не UDP клиент напрямую
+            success = await self._network_interface.send_telegram(telegram)
             
             if not success:
                 # Очистка при неудаче отправки
@@ -503,7 +503,7 @@ class BusproGateway:
             import traceback
             _LOGGER.error(traceback.format_exc())
             return None
-            
+
     def _handle_telegram_timeout(self, request_id, future):
         """Handle telegram request timeout."""
         if not future.done():
@@ -754,23 +754,31 @@ class BusproGateway:
         if not future.done():
             future.set_result({"status": "timeout"}) 
 
-    async def send_discovery_packet(self, subnet_id, device_id=0xFF):
-        """Отправить пакет обнаружения устройств HDL Buspro."""
+    async def send_discovery_packet(self, subnet_id: int) -> bool:
+        """Отправить пакет обнаружения устройств в подсети."""
         try:
-            # Код операции для запроса обнаружения устройств
-            operate_code = [0x00, 0x0E]  # 0x000E - "Device Discovery" в HDL Buspro
+            _LOGGER.info(f"Отправка пакета обнаружения для подсети {subnet_id}")
             
-            # Отправляем запрос с широковещательным адресом
-            _LOGGER.info(f"Отправка запроса обнаружения для подсети {subnet_id}.{device_id} через шлюз {self.gateway_host}:{self.gateway_port}")
+            # Создаем правильную телеграмму с необходимыми полями
+            telegram = {
+                "target_subnet_id": subnet_id,  # Явно указываем целевую подсеть
+                "target_device_id": 0xFF,       # Broadcast в пределах подсети
+                "source_subnet_id": self.device_subnet_id,
+                "source_device_id": self.device_id,
+                "operate_code": OPERATION_DISCOVERY,
+                "data": []
+            }
             
-            result = await self.send_message(
-                [subnet_id, device_id, 0, 0],  # target_address - broadcast для подсети
-                operate_code,                  # операция обнаружения
-                [],                            # пустые данные
-                timeout=3.0                    # увеличенный таймаут
-            )
+            # Отправляем пакет через сетевой интерфейс
+            success = await self._network_interface.send_telegram(telegram)
             
-            return result is not None
+            if not success:
+                _LOGGER.error(f"Не удалось отправить пакет обнаружения для подсети {subnet_id}")
+                
+            return success
+                
         except Exception as e:
-            _LOGGER.error(f"Ошибка при отправке запроса обнаружения: {e}")
+            _LOGGER.error(f"Ошибка при отправке пакета обнаружения: {e}")
+            import traceback
+            _LOGGER.error(traceback.format_exc())
             return False 

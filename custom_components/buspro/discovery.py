@@ -227,13 +227,29 @@ class BusproDiscovery:
             else:
                 # Запасной вариант, если метод не найден
                 operate_code = 0x000E  # "Device Discovery" в HDL Buspro
-                result = await self.gateway.send_message(
-                    [subnet_id, 0xFF, 0, 0],  # target_address - broadcast для всей подсети
-                    [operate_code >> 8, operate_code & 0xFF],  # операция обнаружения
-                    [],  # пустые данные
-                    timeout=3.0  # увеличенный таймаут
-                )
-                return result is not None
+                
+                # Создаем правильную телеграмму с необходимыми полями
+                telegram = {
+                    "target_subnet_id": subnet_id,  # Важно! Используем правильный ключ
+                    "target_device_id": 0xFF,       # Broadcast
+                    "source_subnet_id": self.device_subnet_id,
+                    "source_device_id": self.device_id,
+                    "operate_code": operate_code,
+                    "data": []
+                }
+                
+                # Отправляем телеграмму через шлюз
+                if hasattr(self.gateway, 'send_telegram'):
+                    return await self.gateway.send_telegram(telegram)
+                else:
+                    # Совсем запасной вариант для обратной совместимости
+                    result = await self.gateway.send_message(
+                        [subnet_id, 0xFF, 0, 0],  # target_address - broadcast для всей подсети
+                        [operate_code >> 8, operate_code & 0xFF],  # операция обнаружения
+                        [],  # пустые данные
+                        timeout=3.0  # увеличенный таймаут
+                    )
+                    return result is not None
                 
         except Exception as e:
             _LOGGER.error(f"Ошибка при отправке запроса обнаружения: {e}")
