@@ -322,12 +322,12 @@ class NetworkInterface:
             return None
 
     async def send_telegram(
-        self, target_subnet_id, target_device_id, operate_code, data=None
+        self, target_subnet_id=None, target_device_id=None, operate_code=None, data=None
     ) -> bool:
         """Send a telegram to the HDL Buspro gateway.
         
         Args:
-            target_subnet_id: Target subnet ID
+            target_subnet_id: Target subnet ID or full telegram dict
             target_device_id: Target device ID
             operate_code: Operation code
             data: Data to send
@@ -340,35 +340,40 @@ class NetworkInterface:
             return False
             
         try:
-            # Строим телеграмму
-            telegram = {
-                "source_subnet_id": self.device_subnet_id,
-                "source_device_id": self.device_id,
-                "target_subnet_id": target_subnet_id,
-                "target_device_id": target_device_id,
-                "operate_code": operate_code,
-                "data": data or [],
-            }
+            # Проверяем, передан ли словарь телеграммы или отдельные параметры
+            if isinstance(target_subnet_id, dict):
+                # Если первый аргумент - словарь, используем его как телеграмму
+                telegram = target_subnet_id
+            else:
+                # Строим телеграмму из отдельных параметров
+                telegram = {
+                    "source_subnet_id": self.device_subnet_id,
+                    "source_device_id": self.device_id,
+                    "target_subnet_id": target_subnet_id,
+                    "target_device_id": target_device_id,
+                    "operate_code": operate_code,
+                    "data": data or [],
+                }
             
             # Логируем отправку команды через шлюз
             _LOGGER.debug(
                 f"Отправка команды через шлюз ({self.hdl_gateway_host}:{self.hdl_gateway_port}): "
-                f"Subnet={target_subnet_id}, DeviceID={target_device_id}, "
-                f"OpCode=0x{operate_code:04X}, Data={data}"
+                f"Subnet={telegram.get('target_subnet_id')}, DeviceID={telegram.get('target_device_id')}, "
+                f"OpCode=0x{telegram.get('operate_code', 0):04X}, Data={telegram.get('data')}"
             )
             
             # Отправляем сообщение
             result = await self._send_message(telegram)
             if not result:
                 _LOGGER.warning(
-                    f"Не удалось отправить телеграмму устройству {target_subnet_id}.{target_device_id} "
-                    f"с кодом операции 0x{operate_code:04X}"
+                    f"Не удалось отправить телеграмму устройству {telegram.get('target_subnet_id')}.{telegram.get('target_device_id')} "
+                    f"с кодом операции 0x{telegram.get('operate_code', 0):04X}"
                 )
                 return False
                 
             return True
         except Exception as exc:
             _LOGGER.error(
-                f"Ошибка при отправке телеграммы устройству {target_subnet_id}.{target_device_id}: {exc}"
+                f"Ошибка при отправке телеграммы: {exc}"
             )
             return False

@@ -34,8 +34,19 @@ class Device(object):
         for device_updated_cb in self.device_updated_cbs:
             await device_updated_cb(self)
 
-    async def _send_telegram(self, telegram):
-        await self._buspro.network_interface.send_telegram(telegram)
+    async def send_telegram(self, telegram):
+        if not isinstance(telegram, dict):
+            # Преобразуем объект Telegram в словарь для отправки
+            telegram_dict = {
+                "target_subnet_id": telegram.target_address[0],
+                "target_device_id": telegram.target_address[1],
+                "operate_code": telegram.operate_code,
+                "data": telegram.payload if telegram.payload is not None else []
+            }
+            await self._buspro.network_interface.send_telegram(telegram_dict)
+        else:
+            # Если это уже словарь, отправляем как есть
+            await self._buspro.network_interface.send_telegram(telegram)
 
     # async def _send_control(self, control):
     #     await self._buspro.network_interface.send_control(control)

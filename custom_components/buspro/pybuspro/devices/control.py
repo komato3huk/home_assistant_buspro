@@ -75,11 +75,16 @@ class _Control:
 
     async def send(self):
         telegram = self.telegram
+        
+        # Преобразуем объект Telegram в словарь для отправки
+        telegram_dict = {
+            "target_subnet_id": telegram.target_address[0],
+            "target_device_id": telegram.target_address[1],
+            "operate_code": telegram.operate_code,
+            "data": telegram.payload if telegram.payload is not None else []
+        }
 
-        # if telegram.target_address[1] == 100:
-        #     print("==== {}".format(str(telegram)))
-
-        await self._buspro.network_interface.send_telegram(telegram)
+        await self._buspro.network_interface.send_telegram(telegram_dict)
 
 
 class _GenericControl(_Control):
