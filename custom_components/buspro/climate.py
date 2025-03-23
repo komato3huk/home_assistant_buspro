@@ -21,6 +21,7 @@ from homeassistant.components.climate import (
     PRESET_AWAY,
     PRESET_HOME,
     PRESET_SLEEP,
+    FanMode,
 )
 from homeassistant.components.climate.const import ATTR_PRESET_MODE
 from homeassistant.const import (
@@ -179,7 +180,7 @@ class BusproClimate(ClimateEntity):
         
         # Состояния
         self._hvac_mode = HVACMode.OFF
-        self._fan_mode = HVACMode.FAN_MEDIUM
+        self._fan_mode = FanMode.MEDIUM
         self._temperature = 20
         self._target_temp = 20
         self._current_operation = HVACAction.IDLE
@@ -329,9 +330,9 @@ class BusproClimate(ClimateEntity):
         except Exception as err:
             _LOGGER.error(f"Ошибка при установке режима HVAC: {err}")
             
-    async def async_set_fan_mode(self, fan_mode: HVACMode) -> None:
+    async def async_set_fan_mode(self, fan_mode: str) -> None:
         """Set fan mode."""
-        if fan_mode not in [HVACMode.FAN_ONLY, HVACMode.FAN_MEDIUM, HVACMode.FAN_HIGH]:
+        if fan_mode not in [FanMode.AUTO, FanMode.LOW, FanMode.MEDIUM, FanMode.HIGH]:
             _LOGGER.warning(f"Неподдерживаемый режим вентилятора: {fan_mode}")
             return
             
@@ -442,14 +443,16 @@ class BusproClimate(ClimateEntity):
             if self._temperature is None:
                 self._available = False
 
-    def _get_fan_mode_code(self, fan_mode: HVACMode) -> int:
+    def _get_fan_mode_code(self, fan_mode: str) -> int:
         """Получить код режима вентилятора для отправки на устройство."""
-        if fan_mode == HVACMode.FAN_ONLY:
+        if fan_mode == FanMode.AUTO:
             return 0
-        elif fan_mode == HVACMode.FAN_MEDIUM:
+        elif fan_mode == FanMode.LOW:
             return 1
-        elif fan_mode == HVACMode.FAN_HIGH:
+        elif fan_mode == FanMode.MEDIUM:
             return 2
+        elif fan_mode == FanMode.HIGH:
+            return 3
         return 0  # Auto by default
 
 
