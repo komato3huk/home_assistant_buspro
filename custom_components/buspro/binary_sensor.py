@@ -76,18 +76,7 @@ async def async_setup_entry(
         
         _LOGGER.debug(f"Добавлен бинарный датчик: {device_name} ({subnet_id}.{device_id}.{channel}), тип: {device_type}")
     
-    # Для отладки, если не найдено ни одного бинарного сенсора, добавим тестовый
-    if not entities:
-        _LOGGER.info("Добавление тестового датчика движения для отладки")
-        test_entity = BusproBinarySensor(
-            gateway,
-            1,  # subnet_id
-            9,  # device_id
-            1,  # channel
-            "Датчик движения 1.9.1",
-            "motion",
-        )
-        entities.append(test_entity)
+    # Никаких тестовых устройств не добавляем
     
     if entities:
         async_add_entities(entities)

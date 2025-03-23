@@ -160,6 +160,9 @@ class BusproDiscovery:
                 await asyncio.sleep(1)
                 _LOGGER.debug(f"Ожидание ответов: прошло {i+1} сек из {timeout}...")
             
+            # Добавляем известные устройства, если они не были обнаружены автоматически
+            self.add_known_devices()
+            
             # Выводим итоговую информацию
             found_devices = 0
             for device_type, devices in self.devices.items():
@@ -655,6 +658,45 @@ class BusproDiscovery:
                 "category": BINARY_SENSOR,  # По умолчанию как бинарный сенсор
                 "channels": 1,
             }
+
+    def add_known_devices(self):
+        """Добавить известные устройства, которые могут не обнаруживаться автоматически."""
+        _LOGGER.info("Добавление известных устройств HDL...")
+        
+        # Добавляем модуль управления кондиционером MAC01.431 для адреса 1.9
+        device_info = {
+            "category": CLIMATE,
+            "type": 0x0270,  # MAC01.431
+            "model": "HDL-MAC01.431",
+            "name": "Кондиционер 1.9",
+            "channels": 1,
+            "subnet_id": 1,
+            "device_id": 9,
+            "features": ["temperature", "fan_speed", "mode"]
+        }
+        
+        # Проверяем, что такого устройства еще нет в списке
+        if not any(d.get("subnet_id") == 1 and d.get("device_id") == 9 for d in self.devices[CLIMATE]):
+            _LOGGER.info(f"Добавлен кондиционер MAC01.431 с адресом 1.9")
+            self.devices[CLIMATE].append(device_info)
+        
+        # Добавляем модуль управления кондиционером MAC01.431 для адреса 1.4
+        device_info = {
+            "category": CLIMATE,
+            "type": 0x0270,  # MAC01.431
+            "model": "HDL-MAC01.431",
+            "name": "Кондиционер 1.4",
+            "channels": 1,
+            "subnet_id": 1,
+            "device_id": 4,
+            "features": ["temperature", "fan_speed", "mode"]
+        }
+        
+        # Проверяем, что такого устройства еще нет в списке
+        if not any(d.get("subnet_id") == 1 and d.get("device_id") == 4 for d in self.devices[CLIMATE]):
+            _LOGGER.info(f"Добавлен кондиционер MAC01.431 с адресом 1.4")
+            self.devices[CLIMATE].append(device_info)
+            
 
 # Создаем альтернативное имя для BusproDiscovery для обратной совместимости
 DeviceDiscovery = BusproDiscovery 

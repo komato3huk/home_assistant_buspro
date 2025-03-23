@@ -74,57 +74,39 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    """Set up the HDL Buspro climate devices from config entry."""
+    """Set up the HDL Buspro climate platform."""
     gateway = hass.data[DOMAIN][config_entry.entry_id]["gateway"]
     discovery = hass.data[DOMAIN][config_entry.entry_id]["discovery"]
-    
+
     entities = []
-    devices_found = False
-    
-    # Отслеживание уже обработанных устройств для предотвращения дублирования
-    processed_devices = set()
-    
-    # Обрабатываем обнаруженные устройства климат-контроля
+
+    # Получаем устройства климат-контроля из обнаруженных устройств
     for device in discovery.get_devices_by_type(CLIMATE):
-        devices_found = True
         subnet_id = device["subnet_id"]
         device_id = device["device_id"]
-        channel = device.get("channel", 1)
-        device_name = device.get("name", f"Climate {subnet_id}.{device_id}")
-        device_type = device.get("device_type", 0)
+        name = device.get("name", f"Climate {subnet_id}.{device_id}")
+        model = device.get("model", "HDL-MAC01.431")  # По умолчанию считаем модель кондиционера
         
-        # Создаём уникальный ключ для проверки дублирования
-        device_key = f"{subnet_id}.{device_id}.{device_type}"
+        _LOGGER.info(f"Обнаружено климатическое устройство: {name} ({subnet_id}.{device_id}), модель: {model}")
         
-        # Если устройство уже обработано, пропускаем его
-        if device_key in processed_devices:
-            _LOGGER.debug(f"Устройство {device_key} уже обработано, пропускаем")
-            continue
-            
-        processed_devices.add(device_key)
-        
-        _LOGGER.info(f"Обнаружено устройство климат-контроля: {device_name} ({subnet_id}.{device_id}), тип: 0x{device_type:04X}")
-        
-        # Специальная обработка для модуля кондиционера MAC01.431 (0x0270)
-        if device_type == 0x0270:
-            _LOGGER.info(f"Создание сущности для модуля кондиционирования MAC01.431: {subnet_id}.{device_id}")
-            entity = BusproAirConditioner(gateway, subnet_id, device_id, device_name)
-            entities.append(entity)
-            continue
-        
-        # Создаем сущность климат-контроля для других типов устройств
-        entity = BusproClimate(gateway, subnet_id, device_id, device_name)
+        # Создаем сущность climate
+        entity = BusproClimate(
+            gateway,
+            subnet_id,
+            device_id,
+            name,
+            model,
+            device.get("features", ["temperature", "fan_speed", "mode"])
+        )
         entities.append(entity)
-    
-    # Если устройства не обнаружены и включен режим отладки, добавляем тестовое устройство
-    if not devices_found and _LOGGER.getEffectiveLevel() <= logging.DEBUG:
-        _LOGGER.debug(f"Устройства климат-контроля не обнаружены. Добавляем тестовое устройство для отладки.")
-        entity = BusproClimate(gateway, 1, 4, "Test Floor Heating 1.4")
-        entities.append(entity)
-    
+        
+        _LOGGER.debug(f"Добавлено климатическое устройство: {name} ({subnet_id}.{device_id})")
+
     if entities:
         async_add_entities(entities)
-        _LOGGER.info(f"Добавлено {len(entities)} устройств климат-контроля HDL Buspro")
+        _LOGGER.info(f"Добавлено {len(entities)} климатических устройств HDL Buspro")
+    else:
+        _LOGGER.warning("Не найдено ни одного климатического устройства HDL Buspro")
 
 
 async def async_setup_platform(
@@ -176,7 +158,7 @@ async def async_setup_platform(
 
 
 class BusproClimate(ClimateEntity):
-    """Representation of a HDL Buspro Climate device."""
+    """Representation of an HDL Buspro climate device."""
 
     def __init__(
         self,
@@ -184,60 +166,59 @@ class BusproClimate(ClimateEntity):
         subnet_id: int,
         device_id: int,
         name: str,
-        preset_modes: List[str] = None,
+        model: str,
+        features: List[str],
     ):
         """Initialize the climate device."""
-        self._gateway = gateway
-        self._subnet_id = subnet_id
-        self._device_id = device_id
-        self._attr_name = name
-        self._attr_unique_id = f"climate_{subnet_id}_{device_id}"
+        self.gateway = gateway
+        self.subnet_id = subnet_id
+        self.device_id = device_id
+        self._name = name
+        self._model = model
+        self._features = features
         
-        # Состояние устройства
+        # Состояния
         self._hvac_mode = HVACMode.OFF
-        self._hvac_action = HVACAction.IDLE
-        self._target_temperature = 24.0
-        self._current_temperature = None
-        self._preset_mode = PRESET_NONE
-        
-        # Поддерживаемые режимы
-        self._attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.COOL, HVACMode.AUTO]
-        
-        # Настройка поддерживаемых режимов предустановок
-        self._supported_preset_modes = []
-        if preset_modes:
-            valid_presets = [mode for mode in preset_modes if mode in PRESET_MODES_MAP]
-            self._supported_preset_modes = valid_presets
-        
-        # Настройка поддерживаемых функций
-        features = ClimateEntityFeature.TARGET_TEMPERATURE
-        if self._supported_preset_modes:
-            features |= ClimateEntityFeature.PRESET_MODE
-        
-        self._attr_supported_features = features
-        
-        # Настройки температуры
-        self._attr_temperature_unit = UnitOfTemperature.CELSIUS
-        self._attr_min_temp = DEFAULT_MIN_TEMP
-        self._attr_max_temp = DEFAULT_MAX_TEMP
-        self._attr_target_temperature_step = 0.5
-        
-        # Доступность устройства
+        self._fan_mode = HVACMode.FAN_MEDIUM
+        self._temperature = 20
+        self._target_temp = 20
+        self._current_operation = HVACAction.IDLE
         self._available = True
+        
+        _LOGGER.info(f"Инициализирован климатический контроллер: {name} ({subnet_id}.{device_id}), модель: {model}")
         
     async def async_added_to_hass(self):
         """Register callbacks when entity is added to Home Assistant."""
-        await self.async_update()
+        try:
+            # Получаем текущее состояние устройства
+            await self.async_update()
+            _LOGGER.debug(f"Успешно получено состояние для {self._name}")
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при добавлении {self._name} в Home Assistant: {e}")
+            
+    @property
+    def supported_features(self) -> int:
+        """Return the list of supported features."""
+        features = 0
+        
+        if "temperature" in self._features:
+            features |= ClimateEntityFeature.TARGET_TEMPERATURE
+            
+        if "fan_speed" in self._features:
+            features |= ClimateEntityFeature.FAN_MODE
+            
+        if "preset" in self._features:
+            features |= ClimateEntityFeature.PRESET_MODE
+            
+        if "swing" in self._features:
+            features |= ClimateEntityFeature.SWING_MODE
+            
+        return features
         
     @property
     def name(self) -> str:
         """Return the name of the climate device."""
-        return self._attr_name
-        
-    @property
-    def unique_id(self) -> str:
-        """Return the unique ID of the climate device."""
-        return self._attr_unique_id
+        return self._name
         
     @property
     def available(self) -> bool:
@@ -252,31 +233,22 @@ class BusproClimate(ClimateEntity):
     @property
     def hvac_action(self) -> HVACAction:
         """Return the current running hvac operation."""
-        return self._hvac_action
+        return self._current_operation
         
     @property
-    def preset_mode(self) -> Optional[str]:
-        """Return the current preset mode."""
-        if not self._supported_preset_modes:
-            return None
-        return self._preset_mode
-        
-    @property
-    def preset_modes(self) -> Optional[List[str]]:
-        """Return a list of available preset modes."""
-        if not self._supported_preset_modes:
-            return None
-        return self._supported_preset_modes
+    def fan_mode(self) -> HVACMode:
+        """Return the fan setting."""
+        return self._fan_mode
         
     @property
     def current_temperature(self) -> Optional[float]:
         """Return the current temperature."""
-        return self._current_temperature
+        return self._temperature
         
     @property
     def target_temperature(self) -> Optional[float]:
         """Return the temperature we try to reach."""
-        return self._target_temperature
+        return self._target_temp
         
     async def async_set_temperature(self, **kwargs) -> None:
         """Set new target temperature."""
@@ -284,7 +256,7 @@ class BusproClimate(ClimateEntity):
         if temperature is None:
             return
             
-        self._target_temperature = temperature
+        self._target_temp = temperature
         
         # Отправляем команду на устройство
         try:
@@ -293,8 +265,8 @@ class BusproClimate(ClimateEntity):
             
             # Создаем телеграмму для установки температуры
             telegram = {
-                "subnet_id": self._subnet_id,
-                "device_id": self._device_id,
+                "subnet_id": self.subnet_id,
+                "device_id": self.device_id,
                 "operate_code": OPERATE_CODES["control_floor_heating"],
                 "data": [
                     1,  # temperature_type (Celsius)
@@ -309,8 +281,8 @@ class BusproClimate(ClimateEntity):
             }
             
             # Отправляем команду через шлюз
-            await self._gateway.send_telegram(telegram)
-            _LOGGER.debug(f"Установлена целевая температура {temperature}°C для устройства {self._subnet_id}.{self._device_id}")
+            await self.gateway.send_telegram(telegram)
+            _LOGGER.debug(f"Установлена целевая температура {temperature}°C для устройства {self.subnet_id}.{self.device_id}")
             
             # Обновляем состояние после отправки команды
             await self.async_update()
@@ -332,15 +304,15 @@ class BusproClimate(ClimateEntity):
         try:
             # Создаем телеграмму для установки режима
             telegram = {
-                "subnet_id": self._subnet_id,
-                "device_id": self._device_id,
+                "subnet_id": self.subnet_id,
+                "device_id": self.device_id,
                 "operate_code": OPERATE_CODES["control_floor_heating"],
                 "data": [
                     1,  # temperature_type (Celsius)
                     0,  # current_temperature (не меняется при установке)
                     status,  # status (on/off)
                     1,  # mode (Normal)
-                    int(self._target_temperature * 10),  # normal_temperature
+                    int(self._target_temp * 10),  # normal_temperature
                     240,  # day_temperature (24.0°C, не меняется)
                     180,  # night_temperature (18.0°C, не меняется)
                     150,  # away_temperature (15.0°C, не меняется)
@@ -348,8 +320,8 @@ class BusproClimate(ClimateEntity):
             }
             
             # Отправляем команду через шлюз
-            await self._gateway.send_telegram(telegram)
-            _LOGGER.debug(f"Установлен режим HVAC {hvac_mode} для устройства {self._subnet_id}.{self._device_id}")
+            await self.gateway.send_telegram(telegram)
+            _LOGGER.debug(f"Установлен режим HVAC {hvac_mode} для устройства {self.subnet_id}.{self.device_id}")
             
             # Обновляем состояние после отправки команды
             await self.async_update()
@@ -357,62 +329,53 @@ class BusproClimate(ClimateEntity):
         except Exception as err:
             _LOGGER.error(f"Ошибка при установке режима HVAC: {err}")
             
-    async def async_set_preset_mode(self, preset_mode: str) -> None:
-        """Set new preset mode."""
-        if preset_mode not in self._supported_preset_modes:
-            _LOGGER.error(f"Неподдерживаемый режим предустановки: {preset_mode}")
+    async def async_set_fan_mode(self, fan_mode: HVACMode) -> None:
+        """Set fan mode."""
+        if fan_mode not in [HVACMode.FAN_ONLY, HVACMode.FAN_MEDIUM, HVACMode.FAN_HIGH]:
+            _LOGGER.warning(f"Неподдерживаемый режим вентилятора: {fan_mode}")
             return
             
-        # Получаем режим температуры из карты предустановок
-        temp_mode = PRESET_MODES_MAP.get(preset_mode, 1)  # По умолчанию - Normal (1)
-        self._preset_mode = preset_mode
+        self._fan_mode = fan_mode
         
         # Отправляем команду на устройство
         try:
-            # Создаем телеграмму для установки режима предустановки
-            telegram = {
-                "subnet_id": self._subnet_id,
-                "device_id": self._device_id,
-                "operate_code": OPERATE_CODES["control_floor_heating"],
-                "data": [
-                    1,  # temperature_type (Celsius)
-                    0,  # current_temperature (не меняется при установке)
-                    1 if self._hvac_mode != HVACMode.OFF else 0,  # status (on/off)
-                    temp_mode,  # mode (из карты предустановок)
-                    int(self._target_temperature * 10),  # normal_temperature
-                    240,  # day_temperature (24.0°C, не меняется)
-                    180,  # night_temperature (18.0°C, не меняется)
-                    150,  # away_temperature (15.0°C, не меняется)
-                ],
-            }
+            # Код операции для управления вентилятором
+            operation_code = 0x1948  # Примерный код, нужно проверить документацию
             
-            # Отправляем команду через шлюз
-            await self._gateway.send_telegram(telegram)
-            _LOGGER.debug(f"Установлен режим предустановки {preset_mode} для устройства {self._subnet_id}.{self._device_id}")
+            # Данные команды: [режим_вентилятора]
+            fan_mode_code = self._get_fan_mode_code(fan_mode)
+            data = [fan_mode_code]
             
-            # Обновляем состояние после отправки команды
-            await self.async_update()
+            _LOGGER.debug(f"Отправка команды установки режима вентилятора для MAC01.431: {data}")
             
-        except Exception as err:
-            _LOGGER.error(f"Ошибка при установке режима предустановки: {err}")
+            response = await self.gateway.send_message(
+                [self.subnet_id, self.device_id, 0, 0],  # target_address
+                [operation_code >> 8, operation_code & 0xFF],  # operation_code
+                data,  # data
+            )
             
+            self.async_write_ha_state()
+            
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при установке режима вентилятора для MAC01.431: {e}")
+    
     async def async_update(self) -> None:
         """Fetch new state data for this climate device."""
         try:
-            _LOGGER.debug(f"Запрос обновления для устройства климат-контроля {self._subnet_id}.{self._device_id}")
+            _LOGGER.debug(f"Запрос обновления для устройства климат-контроля {self.subnet_id}.{self.device_id}")
             
             # Создаем телеграмму для запроса статуса
             telegram = {
-                "subnet_id": self._subnet_id,
-                "device_id": self._device_id,
+                "subnet_id": self.subnet_id,
+                "device_id": self.device_id,
                 "operate_code": OPERATE_CODES["read_floor_heating"],
                 "data": [],
             }
             
             # Отправляем запрос через шлюз
-            _LOGGER.debug(f"Отправка запроса данных для {self._subnet_id}.{self._device_id}: {telegram}")
-            response = await self._gateway.send_telegram(telegram)
-            _LOGGER.debug(f"Получен ответ от {self._subnet_id}.{self._device_id}: {response}")
+            _LOGGER.debug(f"Отправка запроса данных для {self.subnet_id}.{self.device_id}: {telegram}")
+            response = await self.gateway.send_telegram(telegram)
+            _LOGGER.debug(f"Получен ответ от {self.subnet_id}.{self.device_id}: {response}")
             
             if response and isinstance(response, dict) and "data" in response and response["data"]:
                 data = response["data"]
@@ -428,69 +391,66 @@ class BusproClimate(ClimateEntity):
                     night_temp = data[6] / 10.0
                     away_temp = data[7] / 10.0
                     
-                    _LOGGER.debug(f"Климат-контроль {self._subnet_id}.{self._device_id}: " +
+                    _LOGGER.debug(f"Климат-контроль {self.subnet_id}.{self.device_id}: " +
                                   f"тип={temperature_type}, текущая={current_temp}°C, статус={status}, " +
                                   f"режим={mode}, уставка_обычная={normal_temp}°C, уставка_день={day_temp}°C, " +
                                   f"уставка_ночь={night_temp}°C, уставка_отсутствие={away_temp}°C")
                     
                     # Обновляем состояние устройства
-                    self._current_temperature = current_temp
+                    self._temperature = current_temp
                     
                     # Определяем HVAC режим на основе статуса
                     if status == 0:
                         self._hvac_mode = HVACMode.OFF
-                        self._hvac_action = HVACAction.IDLE
+                        self._current_operation = HVACAction.IDLE
                     else:
                         # По умолчанию устанавливаем режим HEAT
                         self._hvac_mode = HVACMode.HEAT
-                        self._hvac_action = HVACAction.HEATING
+                        self._current_operation = HVACAction.HEATING
                     
                     # Определяем целевую температуру на основе режима
                     if mode == 1:  # Normal
-                        self._target_temperature = normal_temp
-                        self._preset_mode = PRESET_NONE
+                        self._target_temp = normal_temp
                     elif mode == 2:  # Day
-                        self._target_temperature = day_temp
-                        for preset, preset_mode in PRESET_MODES_MAP.items():
-                            if preset_mode == mode and preset in self._supported_preset_modes:
-                                self._preset_mode = preset
-                                break
+                        self._target_temp = day_temp
                     elif mode == 3:  # Night
-                        self._target_temperature = night_temp
-                        for preset, preset_mode in PRESET_MODES_MAP.items():
-                            if preset_mode == mode and preset in self._supported_preset_modes:
-                                self._preset_mode = preset
-                                break
+                        self._target_temp = night_temp
                     elif mode == 4:  # Away
-                        self._target_temperature = away_temp
-                        for preset, preset_mode in PRESET_MODES_MAP.items():
-                            if preset_mode == mode and preset in self._supported_preset_modes:
-                                self._preset_mode = preset
-                                break
-                                
+                        self._target_temp = away_temp
+                    
                     self._available = True
-                    _LOGGER.debug(f"Обновлено состояние устройства климат-контроля {self._subnet_id}.{self._device_id}")
+                    _LOGGER.debug(f"Обновлено состояние устройства климат-контроля {self.subnet_id}.{self.device_id}")
                 else:
                     # При недостаточном количестве данных не меняем статус доступности
-                    _LOGGER.warning(f"Получен неполный ответ от устройства климат-контроля {self._subnet_id}.{self._device_id}: {data}")
+                    _LOGGER.warning(f"Получен неполный ответ от устройства климат-контроля {self.subnet_id}.{self.device_id}: {data}")
             else:
                 # Если устройство доступно, но ответ пустой, сохраняем текущее состояние устройства
                 # и не меняем доступность
                 if self._available:
-                    _LOGGER.debug(f"Устройство климат-контроля {self._subnet_id}.{self._device_id} не вернуло данных, используем предыдущее состояние")
+                    _LOGGER.debug(f"Устройство климат-контроля {self.subnet_id}.{self.device_id} не вернуло данных, используем предыдущее состояние")
                 else:
-                    _LOGGER.warning(f"Не удалось получить данные от устройства климат-контроля {self._subnet_id}.{self._device_id}")
+                    _LOGGER.warning(f"Не удалось получить данные от устройства климат-контроля {self.subnet_id}.{self.device_id}")
                     # Устанавливаем по умолчанию статус доступности только при первом запуске
                     # при отсутствии данных
-                    if self._current_temperature is None:
+                    if self._temperature is None:
                         self._available = False
             
         except Exception as err:
-            _LOGGER.error(f"Ошибка при обновлении состояния устройства климат-контроля {self._subnet_id}.{self._device_id}: {err}")
+            _LOGGER.error(f"Ошибка при обновлении состояния устройства климат-контроля {self.subnet_id}.{self.device_id}: {err}")
             # Не меняем доступность, если произошла временная ошибка
             # Это позволит избежать мигания устройства в интерфейсе
-            if self._current_temperature is None:
+            if self._temperature is None:
                 self._available = False
+
+    def _get_fan_mode_code(self, fan_mode: HVACMode) -> int:
+        """Получить код режима вентилятора для отправки на устройство."""
+        if fan_mode == HVACMode.FAN_ONLY:
+            return 0
+        elif fan_mode == HVACMode.FAN_MEDIUM:
+            return 1
+        elif fan_mode == HVACMode.FAN_HIGH:
+            return 2
+        return 0  # Auto by default
 
 
 class BusproAirConditioner(ClimateEntity):

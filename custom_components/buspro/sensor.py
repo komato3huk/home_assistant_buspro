@@ -99,50 +99,35 @@ async def async_setup_entry(
         device_id = device["device_id"]
         channel = device.get("channel", 1)
         device_name = device.get("name", f"Sensor {subnet_id}.{device_id}")
-        device_type = device.get("type")
+        device_type = device.get("type", "temperature")
         
         _LOGGER.info(f"Обнаружен сенсор: {device_name} ({subnet_id}.{device_id}.{channel}), тип: {device_type}")
         
-        # Определяем тип сенсора и его параметры
+        # Получаем конфигурацию сенсора по типу
         sensor_type_key = None
         if device_type == "temperature":
             sensor_type_key = 0x01
         elif device_type == "humidity":
             sensor_type_key = 0x02
-        elif device_type == "illuminance":
+        elif device_type == "illuminance" or device_type == "light_level":
             sensor_type_key = 0x03
-        
+            
         if sensor_type_key:
-            sensor_config = SENSOR_TYPES.get(sensor_type_key, {})
-            
-            entity = BusproSensor(
-                gateway,
-                subnet_id,
-                device_id,
-                channel,
-                device_name,
-                sensor_type_key,
-                sensor_config,
-            )
-            entities.append(entity)
-            
-            _LOGGER.debug(f"Добавлен сенсор: {device_name} ({subnet_id}.{device_id}.{channel}), тип: {sensor_type_key}")
-        else:
-            _LOGGER.warning(f"Неизвестный тип сенсора: {device_type} для устройства {subnet_id}.{device_id}")
+            sensor_config = SENSOR_TYPES.get(sensor_type_key)
+            if sensor_config:
+                entity = BusproSensor(
+                    gateway,
+                    subnet_id,
+                    device_id,
+                    channel,
+                    device_name,
+                    sensor_type_key,
+                    sensor_config,
+                )
+                entities.append(entity)
+                _LOGGER.debug(f"Добавлен сенсор: {device_name} ({subnet_id}.{device_id}.{channel}), тип: {device_type}")
     
-    # Для отладки, если не найдено ни одного сенсора температуры, добавим тестовый
-    if not any(entity._sensor_type_key == 0x01 for entity in entities):
-        _LOGGER.info("Добавление тестового сенсора температуры для отладки")
-        test_entity = BusproSensor(
-            gateway,
-            1,  # subnet_id
-            4,  # device_id
-            1,  # channel
-            "Температура пола 1.4",
-            0x01,  # sensor_type_key (температура)
-            SENSOR_TYPES[0x01],
-        )
-        entities.append(test_entity)
+    # Никаких тестовых устройств не добавляем
     
     if entities:
         async_add_entities(entities)
