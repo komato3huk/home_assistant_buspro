@@ -170,78 +170,81 @@ class BusproGateway:
         """Return True if gateway is connected."""
         return self._connected
 
-    async def send_message(self, target_address, operation_code, data):
-        """Отправка сообщения устройству HDL Buspro.
-        
-        Args:
-            target_address: Список [subnet_id, device_id, типовое значение 0, типовое значение 0]
-            operation_code: Список [старший байт кода операции, младший байт]
-            data: Список данных команды
+    async def send_message(self, target_address, operation_code, data=None, timeout=2.0):
+        """Send message to the HDL Buspro gateway."""
+        if not self._udp_client:
+            _LOGGER.error(f"UDP клиент не инициализирован")
+            return None
             
-        Returns:
-            Ответ от устройства или None в случае ошибки
-        """
         try:
-            if not target_address or len(target_address) < 2:
-                _LOGGER.error("Необходимо указать subnet_id и device_id в target_address")
+            # Создаем телеграмму с правильными ключами
+            telegram = {
+                "target_subnet_id": target_address[0],
+                "target_device_id": target_address[1],
+                "source_subnet_id": self.device_subnet_id,
+                "source_device_id": self.device_id,
+                "operate_code": (operation_code[0] << 8) | operation_code[1],
+                "data": data if data is not None else [],
+            }
+            
+            # Если это сообщение широковещательного типа или команда без ответа,
+            # просто отправляем сообщение без ожидания ответа
+            if target_address[1] == 0xFF or operation_code[0] == 0:
+                buffer = self.telegram_helper.build_send_buffer(telegram)
+                if buffer:
+                    _LOGGER.debug(f"Отправка широковещательного сообщения: subnet_id={target_address[0]}, "
+                                f"device_id={target_address[1]}, opcode=0x{telegram['operate_code']:04X}")
+                    await self._udp_client.send(buffer, self.gateway_host, self.gateway_port)
+                    return {"status": "sent"}
+            
+            # Генерируем уникальный ключ для callback
+            callback_key = (target_address[0], target_address[1], telegram["operate_code"])
+            
+            # Создаем future для получения результата
+            future = asyncio.Future()
+            
+            # Создаем функцию обработки ответа
+            def handle_response(response_telegram):
+                # Преобразуем ответ в нужный формат
+                return {
+                    "subnet_id": response_telegram.get("source_subnet_id"),
+                    "device_id": response_telegram.get("source_device_id"),
+                    "operate_code": response_telegram.get("operate_code"),
+                    "data": response_telegram.get("data", []),
+                }
+            
+            # Создаем таймер для таймаута
+            timeout_handle = self.hass.loop.call_later(
+                timeout, 
+                self._handle_timeout, 
+                callback_key, 
+                future
+            )
+            
+            # Регистрируем callback
+            self._callbacks[callback_key] = (handle_response, future, timeout_handle)
+            
+            # Отправляем сообщение через сетевой интерфейс
+            success = await self._network_interface.send_telegram(telegram)
+            if not success:
+                _LOGGER.error(f"Не удалось отправить телеграмму для устройства {target_address[0]}.{target_address[1]}")
+                self._callbacks.pop(callback_key, None)
+                if timeout_handle:
+                    timeout_handle.cancel()
                 return None
                 
-            if not operation_code or len(operation_code) < 2:
-                _LOGGER.error("Необходимо указать код операции (2 байта)")
-                return None
+            _LOGGER.debug(f"Отправка сообщения: subnet_id={target_address[0]}, "
+                        f"device_id={target_address[1]}, opcode=0x{telegram['operate_code']:04X}")
             
-            subnet_id = target_address[0]
-            device_id = target_address[1]
-            
-            # Формируем заголовок HDL сообщения
-            header = bytearray([0x48, 0x44, 0x4C, 0x4D, 0x49, 0x52, 0x41, 0x43, 0x4C, 0x45, 0x42, 0x45, 0x41])
-            
-            # Подготавливаем команду
-            command = bytearray([
-                0x00,  # Наш subnet_id (всегда 0 для контроллера)
-                subnet_id,  # Subnet ID получателя
-                0x01,  # Наш device ID (всегда 1 для контроллера)
-                device_id,  # Device ID получателя
-                operation_code[0],  # Старший байт кода операции
-                operation_code[1]   # Младший байт кода операции
-            ])
-            
-            # Добавляем дополнительные данные
-            if data:
-                if isinstance(data, list):
-                    command.extend(data)
-                else:
-                    command.append(data)
-            
-            # Формируем полное сообщение
-            message = header + command
-            
-            # Логируем данные отправки
-            op_code_int = (operation_code[0] << 8) | operation_code[1]
-            _LOGGER.info(f"Отправка команды 0x{op_code_int:04X} для устройства {subnet_id}.{device_id} через шлюз {self.gateway_host}:{self.gateway_port}")
-            _LOGGER.debug(f"Сообщение: {message.hex()}")
-            
-            # Проверяем, что UDP клиент инициализирован
-            if not self._udp_client:
-                _LOGGER.error("UDP клиент не инициализирован. Не могу отправить сообщение.")
-                return None
-                
+            # Ожидаем результат с таймаутом
             try:
-                # Отправляем сообщение через UDP клиент
-                await self._udp_client.send(message, self.gateway_host, self.gateway_port)
-                _LOGGER.debug(f"Сообщение успешно отправлено на {self.gateway_host}:{self.gateway_port}")
+                return await asyncio.wait_for(future, timeout)
+            except asyncio.TimeoutError:
+                _LOGGER.warning(f"Таймаут при ожидании ответа от {target_address[0]}.{target_address[1]}")
+                return {"status": "timeout"}
                 
-                # Ждем небольшую паузу перед продолжением
-                await asyncio.sleep(0.1)
-                
-                # Возвращаем данные
-                return data
-            except Exception as ex:
-                _LOGGER.error(f"Ошибка при отправке сообщения через UDP клиент: {ex}")
-                return None
-            
-        except Exception as ex:
-            _LOGGER.error(f"Ошибка при отправке сообщения: {ex}")
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при отправке сообщения: {e}")
             return None
 
     async def _process_message(self, data):
@@ -445,13 +448,21 @@ class BusproGateway:
             # Формируем полное сообщение
             message = header + command
             
-            # Отправляем сообщение через UDP клиент
-            target_host = self.gateway_host
-            target_port = self.gateway_port
+            # Создаем телеграмму с правильными ключами
+            telegram = {
+                "target_subnet_id": subnet_id,    # Используем правильный ключ
+                "target_device_id": device_id,    # Используем правильный ключ
+                "source_subnet_id": self.device_subnet_id,
+                "source_device_id": self.device_id,
+                "operate_code": operation,
+                "data": data if isinstance(data, list) else [data] if data is not None else []
+            }
             
-            _LOGGER.debug(f"Отправка команды {operation:02x} для {subnet_id}.{device_id} на {target_host}:{target_port}: {message.hex()}")
+            # Отправляем телеграмму через сетевой интерфейс
+            _LOGGER.debug(f"Отправка команды {operation:02x} для {subnet_id}.{device_id} через шлюз {self.gateway_host}:{self.gateway_port}")
             
-            self.hass.async_create_task(self._udp_client.send(message, target_host, target_port))
+            # Используем метод send_telegram через сетевой интерфейс
+            self.hass.async_create_task(self._network_interface.send_telegram(telegram))
             return True
             
         except Exception as ex:
@@ -666,84 +677,6 @@ class BusproGateway:
         _LOGGER.debug(f"Текущие колбэки для устройств: {self._callbacks.keys()}")
         
         return True
-
-    async def send_message(self, target_address, operation_code, data=None, timeout=2.0):
-        """Send message to the HDL Buspro gateway."""
-        if not self._udp_client:
-            _LOGGER.error(f"UDP клиент не инициализирован")
-            return None
-            
-        try:
-            # Создаем телеграмму
-            telegram = {
-                "subnet_id": target_address[0],
-                "device_id": target_address[1],
-                "source_subnet_id": self.device_subnet_id,
-                "source_device_id": self.device_id,
-                "operate_code": (operation_code[0] << 8) | operation_code[1],
-                "data": data if data is not None else [],
-            }
-            
-            # Если это сообщение широковещательного типа или команда без ответа,
-            # просто отправляем сообщение без ожидания ответа
-            if target_address[1] == 0xFF or operation_code[0] == 0:
-                buffer = self.telegram_helper.build_send_buffer(telegram)
-                if buffer:
-                    _LOGGER.debug(f"Отправка широковещательного сообщения: subnet_id={target_address[0]}, "
-                                f"device_id={target_address[1]}, opcode=0x{telegram['operate_code']:04X}")
-                    await self._udp_client.send(buffer, self.gateway_host, self.gateway_port)
-                    return {"status": "sent"}
-            
-            # Генерируем уникальный ключ для callback
-            callback_key = (target_address[0], target_address[1], telegram["operate_code"])
-            
-            # Создаем future для получения результата
-            future = asyncio.Future()
-            
-            # Создаем функцию обработки ответа
-            def handle_response(response_telegram):
-                # Преобразуем ответ в нужный формат
-                return {
-                    "subnet_id": response_telegram.get("source_subnet_id"),
-                    "device_id": response_telegram.get("source_device_id"),
-                    "operate_code": response_telegram.get("operate_code"),
-                    "data": response_telegram.get("data", []),
-                }
-            
-            # Создаем таймер для таймаута
-            timeout_handle = self.hass.loop.call_later(
-                timeout, 
-                self._handle_timeout, 
-                callback_key, 
-                future
-            )
-            
-            # Регистрируем callback
-            self._callbacks[callback_key] = (handle_response, future, timeout_handle)
-            
-            # Отправляем сообщение
-            buffer = self.telegram_helper.build_send_buffer(telegram)
-            if not buffer:
-                _LOGGER.error(f"Не удалось создать буфер отправки для телеграммы: {telegram}")
-                self._callbacks.pop(callback_key, None)
-                if timeout_handle:
-                    timeout_handle.cancel()
-                return None
-                
-            _LOGGER.debug(f"Отправка сообщения: subnet_id={target_address[0]}, "
-                        f"device_id={target_address[1]}, opcode=0x{telegram['operate_code']:04X}")
-            await self._udp_client.send(buffer, self.gateway_host, self.gateway_port)
-            
-            # Ожидаем результат с таймаутом
-            try:
-                return await asyncio.wait_for(future, timeout)
-            except asyncio.TimeoutError:
-                _LOGGER.warning(f"Таймаут при ожидании ответа от {target_address[0]}.{target_address[1]}")
-                return {"status": "timeout"}
-                
-        except Exception as e:
-            _LOGGER.error(f"Ошибка при отправке сообщения: {e}")
-            return None
 
     def _handle_timeout(self, callback_key, future):
         """Handle timeout for message response."""

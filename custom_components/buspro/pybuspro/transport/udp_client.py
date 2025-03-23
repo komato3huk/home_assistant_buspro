@@ -84,48 +84,40 @@ class UDPClient:
             _LOGGER.error(traceback.format_exc())
             return False
     
-    async def send_message(self, message: Dict[str, Any]) -> bool:
-        """Send message to HDL Buspro device.
+    async def send_message(self, message):
+        """Send message through UDP client.
         
         Args:
-            message: Message data as a dictionary or raw bytes
-        
+            message: Telegram dictionary or HDL message
+            
         Returns:
-            bool: True if message was sent successfully
+            bool: True if message was sent
         """
         try:
-            # Если message уже bytes, отправляем как есть
-            if isinstance(message, bytes):
-                return await self.send(message)
+            # Преобразуем старый формат в новый, если необходимо
+            if "subnet_id" in message and "target_subnet_id" not in message:
+                message["target_subnet_id"] = message["subnet_id"]
                 
-            # Если это словарь с полем 'raw_data', используем его
-            if isinstance(message, dict) and 'raw_data' in message:
-                return await self.send(message['raw_data'])
+            if "device_id" in message and "target_device_id" not in message:
+                message["target_device_id"] = message["device_id"]
                 
-            # Проверяем наличие необходимых полей
-            if isinstance(message, dict):
-                target_host = self.target_host
-                target_port = self.target_port
-                
-                # Логируем отправку
-                if 'target_subnet_id' in message and 'target_device_id' in message:
-                    _LOGGER.debug(
-                        f"Отправка сообщения на устройство {message.get('target_subnet_id')}.{message.get('target_device_id')} "
-                        f"через шлюз {target_host}:{target_port}"
-                    )
-                else:
-                    _LOGGER.debug(f"Отправка сообщения через шлюз {target_host}:{target_port}: {message}")
-                
-                # Проверяем формат сообщения
-                if 'raw_data' not in message and not isinstance(message, bytes):
-                    _LOGGER.error(f"Неподдерживаемый формат сообщения: {message}")
-                    return False
+            # Создаем буфер отправки с помощью TelegramHelper
+            from ..helpers.telegram_helper import TelegramHelper
+            th = TelegramHelper()
+            send_buffer = th.build_send_buffer(message)
             
-            # Если дошли сюда, то либо message - это bytes, либо message содержит 'raw_data'
-            return await self.send(message)
+            if not send_buffer:
+                _LOGGER.error(f"Не удалось создать буфер отправки для сообщения")
+                return False
                 
+            # Отправляем буфер
+            return await self.send(
+                send_buffer,
+                self.gateway_host,
+                self.gateway_port
+            )
         except Exception as e:
-            _LOGGER.error(f"Ошибка при отправке сообщения: {e}")
+            _LOGGER.error(f"Ошибка при отправке сообщения через UDP: {e}")
             import traceback
             _LOGGER.error(traceback.format_exc())
             return False
