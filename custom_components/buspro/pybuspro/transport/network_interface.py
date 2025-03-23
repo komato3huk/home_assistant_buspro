@@ -7,6 +7,7 @@ from .udp_client import UDPClient
 from ..helpers.telegram_helper import TelegramHelper
 # from ..devices.control import Control
 import binascii
+import time
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -116,15 +117,59 @@ class NetworkInterface:
         
     async def _read_loop(self):
         """Read data from UDP client continuously."""
+        base_sleep_time = 0.1  # Базовое время сна в секундах
+        max_sleep_time = 1.0   # Максимальное время сна в секундах
+        min_sleep_time = 0.01  # Минимальное время сна в секундах
+        
+        sleep_time = base_sleep_time  # Текущее время сна
+        idle_counter = 0        # Счётчик бездействия
+        max_idle_count = 100    # Максимальное количество итераций бездействия
+        message_counter = 0     # Счётчик сообщений для отладки
+        last_activity_time = time.time()  # Время последней активности
+        
+        _LOGGER.info("Запуск цикла чтения данных UDP")
+        
         while self._connected and self._running:
             try:
                 # В этой реализации нет непрерывного чтения,
                 # так как UDP-клиент вызывает обратный вызов при получении данных
-                # Просто ждем некоторое время, чтобы не загружать CPU
-                await asyncio.sleep(0.1)
+                
+                # Ждём указанное время
+                await asyncio.sleep(sleep_time)
+                
+                # Если долгое время нет активности, увеличиваем интервал сна
+                if time.time() - last_activity_time > 5.0:  # 5 секунд бездействия
+                    idle_counter += 1
+                    
+                    # Адаптивно увеличиваем время сна до максимального значения
+                    if idle_counter > max_idle_count:
+                        sleep_time = min(sleep_time * 1.1, max_sleep_time)
+                        idle_counter = 0
+                        
+                        if sleep_time >= max_sleep_time:
+                            _LOGGER.debug("Низкая активность UDP, увеличен интервал ожидания до %s сек", sleep_time)
+                else:
+                    # При наличии активности постепенно уменьшаем время сна
+                    idle_counter = 0
+                    sleep_time = max(sleep_time * 0.9, min_sleep_time)
+                    
+                # Периодически выводим статистику (каждые ~30 секунд)
+                message_counter += 1
+                if message_counter % 300 == 0:  # Примерно каждые 30 секунд при базовом sleep_time
+                    _LOGGER.debug("Статистика UDP: активность %s сек назад, интервал ожидания %s сек", 
+                                 time.time() - last_activity_time, sleep_time)
+                    
+            except asyncio.CancelledError:
+                _LOGGER.info("Цикл чтения данных UDP остановлен")
+                break
             except Exception as err:
-                _LOGGER.error("Error in read loop: %s", err)
-                await asyncio.sleep(1)
+                _LOGGER.error("Ошибка в цикле чтения данных UDP: %s", err)
+                
+                # В случае ошибки увеличиваем время ожидания
+                sleep_time = max_sleep_time
+                await asyncio.sleep(sleep_time)
+                
+        _LOGGER.info("Завершён цикл чтения данных UDP")
                 
     @property
     def connected(self):

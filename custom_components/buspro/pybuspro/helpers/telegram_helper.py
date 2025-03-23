@@ -207,8 +207,8 @@ class TelegramHelper:
             buffer.append(len(data) & 0xFF)
             buffer.extend(data)
             
-            # Добавляем CRC
-            crc = self._calculate_crc(buffer)
+            # Добавляем CRC, используя новый универсальный метод
+            crc = self.calculate_crc(buffer, method="simple")
             buffer.append(crc & 0xFF)
             
             _LOGGER.debug(
@@ -277,3 +277,72 @@ class TelegramHelper:
             reg &= 0xFFFF
             # reflect out
         return reg ^ xor_out
+        
+    def calculate_crc(self, data, method="simple"):
+        """Calculate CRC based on method.
+        
+        Args:
+            data: Data to calculate CRC for (bytearray, bytes, telegram)
+            method: CRC method to use ("simple", "crc16", "telegram")
+            
+        Returns:
+            CRC value according to selected method
+        """
+        if method == "simple":
+            # Простой алгоритм суммирования байтов
+            if isinstance(data, (bytearray, bytes, list)):
+                crc = 0
+                for i in range(len(data)):
+                    crc += data[i]
+                return crc & 0xFF
+            else:
+                _LOGGER.error(f"Неподдерживаемый тип данных для CRC simple: {type(data)}")
+                return 0
+                
+        elif method == "crc16":
+            # Алгоритм CRC16 для более сложных проверок
+            if isinstance(data, (bytearray, bytes)):
+                data_bytes = data
+            elif isinstance(data, list):
+                data_bytes = bytes(data)
+            else:
+                _LOGGER.error(f"Неподдерживаемый тип данных для CRC16: {type(data)}")
+                return 0
+                
+            xor_in = 0x0000  # initial value
+            xor_out = 0x0000  # final XOR value
+            poly = 0x1021    # generator polinom (normal form)
+        
+            reg = xor_in
+            for octet in data_bytes:
+                # reflect in
+                for i in range(8):
+                    topbit = reg & 0x8000
+                    if octet & (0x80 >> i):
+                        topbit ^= 0x8000
+                    reg <<= 1
+                    if topbit:
+                        reg ^= poly
+                reg &= 0xFFFF
+                # reflect out
+            return reg ^ xor_out
+            
+        elif method == "telegram":
+            # Специализированный CRC для телеграмм
+            if not hasattr(data, 'payload') or not hasattr(data, 'udp_data'):
+                _LOGGER.error(f"Данные не являются объектом telegram: {data}")
+                return 0
+                
+            length_of_data_package = 11 + len(data.payload)
+            crc_buf_length = length_of_data_package - 2
+            send_buf = data.udp_data[:-2]
+            crc_buf = send_buf[-crc_buf_length:]
+            crc_buf_as_bytes = bytes(crc_buf)
+            
+            # Используем CRC16 для вычисления
+            crc = self.calculate_crc(crc_buf_as_bytes, method="crc16")
+            return pack(">H", crc)
+            
+        else:
+            _LOGGER.error(f"Неподдерживаемый метод CRC: {method}")
+            return 0

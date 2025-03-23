@@ -81,6 +81,9 @@ async def async_setup_entry(
     entities = []
     devices_found = False
     
+    # Отслеживание уже обработанных устройств для предотвращения дублирования
+    processed_devices = set()
+    
     # Обрабатываем обнаруженные устройства климат-контроля
     for device in discovery.get_devices_by_type(CLIMATE):
         devices_found = True
@@ -88,29 +91,35 @@ async def async_setup_entry(
         device_id = device["device_id"]
         channel = device.get("channel", 1)
         device_name = device.get("name", f"Climate {subnet_id}.{device_id}")
-        
-        _LOGGER.info(f"Обнаружено устройство климат-контроля: {device_name} ({subnet_id}.{device_id})")
-        
-        # Специальная обработка для определенных устройств
-        # HDL Buspro Floor Heating Actuator обычно имеет тип 0x0073
         device_type = device.get("device_type", 0)
-        _LOGGER.debug(f"Тип устройства климат-контроля: 0x{device_type:04X}")
+        
+        # Создаём уникальный ключ для проверки дублирования
+        device_key = f"{subnet_id}.{device_id}.{device_type}"
+        
+        # Если устройство уже обработано, пропускаем его
+        if device_key in processed_devices:
+            _LOGGER.debug(f"Устройство {device_key} уже обработано, пропускаем")
+            continue
+            
+        processed_devices.add(device_key)
+        
+        _LOGGER.info(f"Обнаружено устройство климат-контроля: {device_name} ({subnet_id}.{device_id}), тип: 0x{device_type:04X}")
         
         # Специальная обработка для модуля кондиционера MAC01.431 (0x0270)
         if device_type == 0x0270:
-            _LOGGER.info(f"Модуль управления кондиционером MAC01.431: {subnet_id}.{device_id}")
+            _LOGGER.info(f"Создание сущности для модуля кондиционирования MAC01.431: {subnet_id}.{device_id}")
             entity = BusproAirConditioner(gateway, subnet_id, device_id, device_name)
             entities.append(entity)
             continue
         
-        # Создаем сущность климат-контроля
+        # Создаем сущность климат-контроля для других типов устройств
         entity = BusproClimate(gateway, subnet_id, device_id, device_name)
         entities.append(entity)
     
-    # Если устройства не обнаружены, добавляем их вручную для отладки
-    if not devices_found:
-        _LOGGER.info(f"Устройства климат-контроля не обнаружены. Добавляем устройство вручную для отладки.")
-        entity = BusproClimate(gateway, 1, 4, "Floor Heating 1.4")
+    # Если устройства не обнаружены и включен режим отладки, добавляем тестовое устройство
+    if not devices_found and _LOGGER.getEffectiveLevel() <= logging.DEBUG:
+        _LOGGER.debug(f"Устройства климат-контроля не обнаружены. Добавляем тестовое устройство для отладки.")
+        entity = BusproClimate(gateway, 1, 4, "Test Floor Heating 1.4")
         entities.append(entity)
     
     if entities:

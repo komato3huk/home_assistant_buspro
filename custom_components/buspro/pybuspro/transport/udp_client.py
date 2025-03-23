@@ -116,10 +116,12 @@ class UDPClient:
                 else:
                     _LOGGER.debug(f"Отправка сообщения через шлюз {target_host}:{target_port}: {message}")
                 
-                # Если message представлен в другом формате, выдаем ошибку
-                _LOGGER.error(f"Неподдерживаемый формат сообщения: {message}")
-                return False
-                
+                # Проверяем формат сообщения
+                if 'raw_data' not in message and not isinstance(message, bytes):
+                    _LOGGER.error(f"Неподдерживаемый формат сообщения: {message}")
+                    return False
+            
+            # Если дошли сюда, то либо message - это bytes, либо message содержит 'raw_data'
             return await self.send(message)
                 
         except Exception as e:

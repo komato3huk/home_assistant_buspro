@@ -88,9 +88,9 @@ class BusproDiscovery:
                 channels = device_info.get('channels', 1)
                 
                 # Формируем уникальный ключ устройства для проверки наличия дубликатов
-                device_key = f"{subnet_id}.{device_id}"
+                device_key = f"{subnet_id}.{device_id}.{device_type}"
                 
-                if hasattr(self, '_processed_devices') and device_key in self._processed_devices:
+                if device_key in self._processed_devices:
                     _LOGGER.debug(f"[DISCOVERY] Устройство {device_key} уже обработано, пропускаем")
                 else:
                     # Запоминаем, что это устройство уже обработано
@@ -521,7 +521,25 @@ class BusproDiscovery:
             
             # Специальная обработка для MAC01.431 - модуль кондиционирования
             if device_type == 0x0270:
-                _LOGGER.info(f"Обнаружен модуль управления кондиционером MAC01.431: {subnet_id}.{device_id}")
+                _LOGGER.info(f"Найден модуль кондиционирования MAC01.431: {subnet_id}.{device_id}")
+                
+                # Создаем единое устройство в категории CLIMATE
+                device_info = {
+                    "category": CLIMATE,
+                    "type": device_type,
+                    "model": model,
+                    "name": f"Fancoil {subnet_id}.{device_id}",
+                    "channels": 1,  # Указываем, что это одно устройство
+                    "subnet_id": subnet_id,
+                    "device_id": device_id,
+                    "features": ["temperature", "fan_speed", "mode"]
+                }
+                
+                # Добавляем только одно устройство в список климатических устройств
+                if not any(d["subnet_id"] == subnet_id and d["device_id"] == device_id for d in self.devices[CLIMATE]):
+                    self.devices[CLIMATE].append(device_info)
+                
+                return device_info
             
             return {
                 "category": CLIMATE,
