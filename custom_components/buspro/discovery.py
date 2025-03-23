@@ -315,6 +315,13 @@ class BusproDiscovery:
             0x0095: "HDL-DLP-OLD",        # Старая DLP панель
             0x009C: "HDL-DLPv2",          # DLP v2 панель
             
+            # Новые типы из списка пользователя
+            0x0b21: "HDL-MPTL4C.48",      # Granite Display
+            0x0b2c: "HDL-MPR0210-S.40",   # Power Interface- With 2CH 10A Relay
+            0x0857: "HDL-MPR0210-E.40",   # 2CH 10A Flush-mounted Switching Actuator
+            0x0dee: "HDL-MSD04T.40",      # 4 zone dry contact module with temp. sensor
+            0x1637: "HDL-MHRCU-Ⅱ.433",    # RCU Room Control Unit
+            
             # Сенсорные экраны
             0x0100: "HDL-MPTL14.46",      # Сенсорный экран Granite
             0x01CC: "HDL-MPTLC43.46",     # Сенсорный экран Granite Classic 4.3"
@@ -326,12 +333,21 @@ class BusproDiscovery:
             
             # Сенсорные панели
             0x012B: "HDL-WS8M",           # 8-клавишная настенная панель
+            0x012C: "HDL-WS4M",           # 4-клавишная настенная панель
+            0x012D: "HDL-TS4M",           # 4-клавишная сенсорная панель
+            0x012E: "HDL-TS8M",           # 8-клавишная сенсорная панель
+            0x012F: "HDL-TS12M",          # 12-клавишная сенсорная панель
+            0x0130: "HDL-MP6B",           # 6-кнопочная панель
+            0x0131: "HDL-MP12B",          # 12-кнопочная панель
             
             # Контроллеры климата
             0x0073: "HDL-MFHC01.431",     # Контроллер теплого пола
             0x0174: "HDL-MPWPID01.48",    # Модуль управления вентиляторами (фанкойлами)
             0x0270: "HDL-MAC01.431",      # Модуль управления кондиционерами (Air Conditioner Module)
             0x0077: "HDL-DRY-4Z",         # Сухой контакт 4-зоны
+            0x0175: "HDL-MTAC.433",       # Термостат
+            0x0274: "HDL-MFAN01.432",     # Модуль управления вентиляторами
+            0x0275: "HDL-MFAN02.432",     # Двухканальный модуль управления вентиляторами
             
             # Модули освещения
             0x0178: "HDL-MPDI06.40K",     # 6-канальный модуль диммера
@@ -340,16 +356,32 @@ class BusproDiscovery:
             0x0255: "HDL-MLED01.40K",     # 1-канальный модуль управления LED
             0x0260: "HDL-DN-DT0601",      # 6-канальный универсальный диммер
             0x026D: "HDL-MDT0601",        # 6-канальный диммер нового типа
+            0x0272: "HDL-MLED04.40K",     # 4-канальный модуль управления LED
+            0x0273: "HDL-MLED10.40K",     # 10-канальный модуль управления LED
+            0x0179: "HDL-MPDI08.40K",     # 8-канальный модуль диммера
+            0x017A: "HDL-MPDI12.40K",     # 12-канальный модуль диммера
+            0x017B: "HDL-MD0104.40",      # 1-канальный диммер высокой мощности
+            0x025E: "HDL-MDT0402",        # 4-канальный диммер
+            0x025F: "HDL-MDT0602",        # 6-канальный диммер
+            0x0261: "HDL-MDLED0605.432",  # 6-канальный LED-диммер
+            0x0262: "HDL-MDLED0805.432",  # 8-канальный LED-диммер
             
             # Модули штор/роллет
             0x0180: "HDL-MW02.431",       # 2-канальный модуль управления шторами/жалюзи
             0x0182: "HDL-MW04.431",       # 4-канальный модуль управления шторами/жалюзи
+            0x0181: "HDL-MW01.431",       # 1-канальный модуль управления шторами/жалюзи
+            0x0183: "HDL-MW06.431",       # 6-канальный модуль управления шторами/жалюзи
             
             # Реле
             0x0188: "HDL-MR0810.433",     # 8-канальный релейный модуль 10A
             0x0189: "HDL-MR1610.431",     # 16-канальный релейный модуль 10A
             0x018A: "HDL-MR0416.432",     # 4-канальный релейный модуль 16A
             0x01AC: "HDL-R0816",          # 8-канальное реле
+            0x0187: "HDL-MR0410.431",     # 4-канальный релейный модуль 10A
+            0x018B: "HDL-MR0816.432",     # 8-канальный релейный модуль 16A
+            0x01A1: "HDL-R1216",          # 12-канальное реле 16A
+            0x01A2: "HDL-R2416",          # 24-канальное реле 16A
+            0x0230: "HDL-MR1216.4C",      # 12-канальный релейный модуль
             
             # Сенсоры и мультисенсоры
             0x018C: "HDL-MSPU05.4C",      # Мультисенсор (движение, освещенность, ИК)
@@ -358,14 +390,25 @@ class BusproDiscovery:
             0x0134: "HDL-CMS-12in1",      # 12-в-1 датчик
             0x0135: "HDL-CMS-8in1",       # 8-в-1 датчик
             0x0150: "HDL-MSP07M",         # Мультисенсор
+            0x0151: "HDL-MTS10.2WI",      # Датчик температуры
+            0x0152: "HDL-MECO.4C",        # Датчик CO2
+            0x0153: "HDL-MTHS.4C",        # Датчик температуры и влажности
             
             # Логика и безопасность
             0x0453: "HDL-DN-Logic960",    # Логический модуль
             0x0BE9: "HDL-DN-SEC250K",     # Модуль безопасности
+            0x0BEA: "HDL-GSM.431",        # GSM модуль
+            0x0BEB: "HDL-MCM08.431",      # Модуль управления безопасностью
             
             # Шлюзы и интерфейсы
             0x0192: "HDL-MBUS01.431",     # HDL Buspro интерфейс
             0x0195: "HDL-MNETC.431",      # Ethernet-HDL шлюз
+            0x0196: "HDL-MWGW01.431",     # WiFi шлюз
+            0x0197: "HDL-MGSM.431",       # GSM шлюз
+            0x01A8: "HDL-MZONEC01.431",   # Шлюз мультизоны
+            
+            # DMX модули
+            0x0210: "HDL-MDMX512.432",    # DMX512 интерфейс
 
             # Специальные и неизвестные типы 
             0xFFFE: "HDL-Custom",         # Кастомное устройство
@@ -378,8 +421,79 @@ class BusproDiscovery:
         """Классифицировать устройство по его типу."""
         # Определяем категорию устройства и количество каналов на основе типа
         
-        # DLP панели и интерфейсы управления    
-        if device_type in [0x0028, 0x002A, 0x0086, 0x0095, 0x009C]:  # DLP панели всех версий
+        # RCU - Room Control Unit (центр управления)
+        if device_type == 0x1637:  # HDL-MHRCU-Ⅱ.433
+            _LOGGER.info(f"Обнаружен модуль управления комнатой HDL-MHRCU-Ⅱ.433: {subnet_id}.{device_id}")
+            # Модуль может управлять множеством функций, включая климат
+            return {
+                "category": CLIMATE,
+                "channels": 1,
+            }
+        
+        # Релейные модули скрытого монтажа и с интерфейсом питания
+        elif device_type in [0x0857, 0x0b2c]:  # HDL-MPR0210-E.40, HDL-MPR0210-S.40
+            _LOGGER.info(f"Обнаружен 2-канальный релейный модуль: {subnet_id}.{device_id} - {model}")
+            # Эти модули имеют по 2 канала реле
+            return {
+                "category": SWITCH,
+                "channels": 2,
+            }
+        
+        # Модуль сухих контактов с датчиком температуры
+        elif device_type == 0x0dee:  # HDL-MSD04T.40
+            _LOGGER.info(f"Обнаружен модуль сухих контактов с датчиком температуры: {subnet_id}.{device_id}")
+            
+            # Добавляем сенсор температуры
+            temp_device = {
+                "subnet_id": subnet_id,
+                "device_id": device_id,
+                "channel": 1,
+                "name": f"{name} Temp",
+                "model": model,
+                "type": "temperature",
+            }
+            self.devices[SENSOR].append(temp_device)
+            
+            # Добавляем 4 канала сухих контактов как бинарные сенсоры
+            for i in range(1, 5):
+                contact_device = {
+                    "subnet_id": subnet_id,
+                    "device_id": device_id,
+                    "channel": i,
+                    "name": f"{name} Contact {i}",
+                    "model": model,
+                    "type": "dry_contact",
+                }
+                self.devices[BINARY_SENSOR].append(contact_device)
+            
+            return {
+                "category": BINARY_SENSOR,
+                "channels": 4,
+            }
+        
+        # Granite Display
+        elif device_type == 0x0b21:  # HDL-MPTL4C.48
+            _LOGGER.info(f"Обнаружен экран Granite Display: {subnet_id}.{device_id}")
+            
+            # Добавляем сенсор температуры для экрана
+            temp_device = {
+                "subnet_id": subnet_id,
+                "device_id": device_id,
+                "channel": 1,
+                "name": f"{name} Temp",
+                "model": model,
+                "type": "temperature",
+            }
+            self.devices[SENSOR].append(temp_device)
+            
+            # Возвращаем тип климата, так как экраны управляют кондиционерами
+            return {
+                "category": CLIMATE,
+                "channels": 1,
+            }
+        
+        # DLP панели и интерфейсы управления
+        elif device_type in [0x0028, 0x002A, 0x0086, 0x0095, 0x009C]:
             # Добавляем сенсор температуры для DLP
             temp_device = {
                 "subnet_id": subnet_id,
@@ -407,6 +521,44 @@ class BusproDiscovery:
             return {
                 "category": CLIMATE,
                 "channels": 1,
+            }
+        
+        # Обычные панели управления
+        elif device_type in [0x0010, 0x0011, 0x0012, 0x0013, 0x0014, 0x012B, 0x012C, 0x012D, 0x012E, 0x012F, 0x0130, 0x0131]:
+            # Определяем количество кнопок/каналов в зависимости от модели
+            buttons_map = {
+                0x0010: 8,   # MPL8.48 - 8 кнопок
+                0x0011: 4,   # MPL4.48 - 4 кнопки
+                0x0012: 4,   # MPT4.46 - 4 кнопки
+                0x0013: 4,   # MPE04.48 - 4 кнопки
+                0x0014: 2,   # MP2B.48 - 2 кнопки
+                0x012B: 8,   # WS8M - 8 кнопок
+                0x012C: 4,   # WS4M - 4 кнопки
+                0x012D: 4,   # TS4M - 4 кнопки
+                0x012E: 8,   # TS8M - 8 кнопок
+                0x012F: 12,  # TS12M - 12 кнопок
+                0x0130: 6,   # MP6B - 6 кнопок
+                0x0131: 12,  # MP12B - 12 кнопок
+            }
+            
+            buttons_count = buttons_map.get(device_type, 4)
+            
+            # Добавляем каждую кнопку как двоичный сенсор
+            for i in range(1, buttons_count + 1):
+                button_device = {
+                    "subnet_id": subnet_id,
+                    "device_id": device_id,
+                    "channel": i,
+                    "name": f"{name} Button {i}",
+                    "model": model,
+                    "type": "button",
+                }
+                self.devices[BINARY_SENSOR].append(button_device)
+            
+            # Возвращаем BINARY_SENSOR как основной тип устройства
+            return {
+                "category": BINARY_SENSOR,
+                "channels": buttons_count,
             }
         
         # Сенсорные экраны Granite (0x0100)
@@ -441,15 +593,24 @@ class BusproDiscovery:
             }
         
         # Диммеры освещения
-        elif device_type in [0x0178, 0x0251, 0x0254, 0x0255, 0x0260, 0x026D]:
+        elif device_type in [0x0178, 0x0179, 0x017A, 0x017B, 0x0251, 0x0254, 0x0255, 0x025E, 0x025F, 0x0260, 0x0261, 0x0262, 0x026D, 0x0272, 0x0273]:
             # Определяем количество каналов по типу устройства
             channels_map = {
-                0x0178: 6,  # MPDI06.40K - 6 каналов
-                0x0251: 4,  # MD0X04.40 - 4 канала
-                0x0254: 2,  # MLED02.40K - 2 канала
-                0x0255: 1,  # MLED01.40K - 1 канал
-                0x0260: 6,  # DN-DT0601 - 6 каналов
-                0x026D: 6,  # MDT0601 - 6 каналов
+                0x0178: 6,   # MPDI06.40K - 6 каналов
+                0x0179: 8,   # MPDI08.40K - 8 каналов
+                0x017A: 12,  # MPDI12.40K - 12 каналов
+                0x017B: 1,   # MD0104.40 - 1 канал
+                0x0251: 4,   # MD0X04.40 - 4 канала
+                0x0254: 2,   # MLED02.40K - 2 канала
+                0x0255: 1,   # MLED01.40K - 1 канал
+                0x025E: 4,   # MDT0402 - 4 канала
+                0x025F: 6,   # MDT0602 - 6 каналов
+                0x0260: 6,   # DN-DT0601 - 6 каналов
+                0x0261: 6,   # MDLED0605.432 - 6 каналов
+                0x0262: 8,   # MDLED0805.432 - 8 каналов
+                0x026D: 6,   # MDT0601 - 6 каналов
+                0x0272: 4,   # MLED04.40K - 4 канала
+                0x0273: 10,  # MLED10.40K - 10 каналов
             }
             return {
                 "category": LIGHT,
@@ -457,13 +618,18 @@ class BusproDiscovery:
             }
         
         # Релейные модули (выключатели)
-        elif device_type in [0x0188, 0x0189, 0x018A, 0x01AC]:
+        elif device_type in [0x0187, 0x0188, 0x0189, 0x018A, 0x018B, 0x01A1, 0x01A2, 0x01AC, 0x0230]:
             # Определяем количество каналов по типу устройства
             channels_map = {
+                0x0187: 4,   # MR0410.431 - 4 канала
                 0x0188: 8,   # MR0810.433 - 8 каналов
                 0x0189: 16,  # MR1610.431 - 16 каналов
                 0x018A: 4,   # MR0416.432 - 4 канала
+                0x018B: 8,   # MR0816.432 - 8 каналов
+                0x01A1: 12,  # R1216 - 12 каналов
+                0x01A2: 24,  # R2416 - 24 канала
                 0x01AC: 8,   # R0816 - 8 каналов
+                0x0230: 12,  # MR1216.4C - 12 каналов
             }
             return {
                 "category": SWITCH,
@@ -471,59 +637,42 @@ class BusproDiscovery:
             }
         
         # Модули управления шторами/жалюзи
-        elif device_type in [0x0180, 0x0182]:
+        elif device_type in [0x0180, 0x0181, 0x0182, 0x0183]:
             # Определяем количество каналов по типу устройства
             channels_map = {
-                0x0180: 1,  # MW02.431 - 1 роллета (канал 1 управляется через каналы 1.1 и 1.2)
-                0x0182: 4,  # MWM04.431 - 4 канала
+                0x0180: 2,  # MW02.431 - 2 канала
+                0x0181: 1,  # MW01.431 - 1 канал
+                0x0182: 4,  # MW04.431 - 4 канала
+                0x0183: 6,  # MW06.431 - 6 каналов
             }
             
-            # Специальная обработка для MW02.431
-            if device_type == 0x0180:
-                _LOGGER.info(f"Обнаружен модуль управления шторами MW02.431: {subnet_id}.{device_id}")
-                # Для MW02.431 канал 1 = каналы 1.1 и 1.2 (открыть/закрыть)
-                # Канал 2 = каналы 2.1 и 2.2 (открыть/закрыть)
-                for i in range(1, channels_map[device_type] + 1):
-                    cover_device = {
-                        "subnet_id": subnet_id,
-                        "device_id": device_id,
-                        "channel": i,
-                        "name": f"{name} {i}",
-                        "model": model,
-                        "open_channel": i * 2 - 1,  # 1 -> 1, 2 -> 3
-                        "close_channel": i * 2,     # 1 -> 2, 2 -> 4
-                    }
-                    self.devices[COVER].append(cover_device)
-                return {
-                    "category": COVER,
-                    "channels": channels_map.get(device_type, 1),
-                }
-
+            # Каждый канал управляет одной шторой/роллетой
             channels = channels_map.get(device_type, 1)
             for i in range(1, channels + 1):
                 cover_device = {
                     "subnet_id": subnet_id,
                     "device_id": device_id,
                     "channel": i,
-                    "name": f"{name} {i}",
+                    "name": f"{name} CH{i}",
                     "model": model,
-                    "open_channel": i,
-                    "close_channel": i,
                 }
                 self.devices[COVER].append(cover_device)
-                
+            
             return {
                 "category": COVER,
                 "channels": channels,
             }
         
-        # Модули управления системами отопления/охлаждения
-        elif device_type in [0x0073, 0x0174, 0x0270, 0x0077]:
+        # Модули управления климатом
+        elif device_type in [0x0073, 0x0174, 0x0175, 0x0270, 0x0274, 0x0275, 0x0077]:
             # Определяем количество каналов по типу устройства
             channels_map = {
                 0x0073: 4,  # MFHC01.431 - до 4-х зон
                 0x0174: 1,  # MPWPID01.48 - 1 канал
+                0x0175: 1,  # MTAC.433 - 1 канал термостата
                 0x0270: 1,  # MAC01.431 - 1 канал для управления кондиционером
+                0x0274: 1,  # MFAN01.432 - 1 канал управления вентилятором
+                0x0275: 2,  # MFAN02.432 - 2 канала управления вентиляторами
                 0x0077: 4,  # DRY-4Z - 4 зоны (сухие контакты для климатического оборудования)
             }
             
@@ -538,165 +687,282 @@ class BusproDiscovery:
             }
             self.devices[SENSOR].append(temp_device)
             
-            # Специальная обработка для MAC01.431 - модуль кондиционирования
-            if device_type == 0x0270:
-                _LOGGER.info(f"Найден модуль кондиционирования MAC01.431: {subnet_id}.{device_id}")
-                
-                # Создаем единое устройство в категории CLIMATE
-                device_info = {
-                    "category": CLIMATE,
-                    "type": device_type,
-                    "model": model,
-                    "name": f"Fancoil {subnet_id}.{device_id}",
-                    "channels": 1,  # Указываем, что это одно устройство
-                    "subnet_id": subnet_id,
-                    "device_id": device_id,
-                    "features": ["temperature", "fan_speed", "mode"]
-                }
-                
-                # Добавляем только одно устройство в список климатических устройств
-                if not any(d["subnet_id"] == subnet_id and d["device_id"] == device_id for d in self.devices[CLIMATE]):
-                    self.devices[CLIMATE].append(device_info)
-                
-                return device_info
-            
             return {
                 "category": CLIMATE,
                 "channels": channels_map.get(device_type, 1),
             }
         
-        # Мультисенсоры
-        elif device_type in [0x018C, 0x018D, 0x018E, 0x0134, 0x0135, 0x0150]:
-            # Добавляем сенсор движения
-            motion_device = {
+        # Сенсоры и мультисенсоры
+        elif device_type in [0x018C, 0x018D, 0x018E, 0x0134, 0x0135, 0x0150, 0x0151, 0x0152, 0x0153]:
+            # Создаем основное устройство как сенсор
+            sensor_device = {
                 "subnet_id": subnet_id,
                 "device_id": device_id,
                 "channel": 1,
-                "name": f"{name} Motion",
+                "name": name,
                 "model": model,
-                "type": "motion",
+                "type": "multisensor",
             }
-            self.devices[BINARY_SENSOR].append(motion_device)
+            self.devices[SENSOR].append(sensor_device)
             
-            # Добавляем сенсор освещенности
-            lux_device = {
-                "subnet_id": subnet_id,
-                "device_id": device_id,
-                "channel": 2,
-                "name": f"{name} Lux",
-                "model": model,
-                "type": "illuminance",
-            }
-            self.devices[SENSOR].append(lux_device)
-            
-            # Для расширенного мультисенсора добавляем дополнительные сенсоры
-            if device_type in [0x018E, 0x0134]:  # MS12.2C и CMS-12in1
-                # Добавляем сенсор температуры
-                temp_device = {
+            # Добавляем датчик движения, если это мультисенсор
+            if device_type in [0x018C, 0x018E, 0x0134, 0x0135, 0x0150]:
+                motion_device = {
                     "subnet_id": subnet_id,
                     "device_id": device_id,
-                    "channel": 3,
-                    "name": f"{name} Temp",
+                    "channel": 2,
+                    "name": f"{name} Motion",
                     "model": model,
-                    "type": "temperature",
+                    "type": "motion",
                 }
-                self.devices[SENSOR].append(temp_device)
-                
-                # Добавляем сенсор влажности
-                humid_device = {
-                    "subnet_id": subnet_id,
-                    "device_id": device_id,
-                    "channel": 4,
-                    "name": f"{name} Humidity",
-                    "model": model,
-                    "type": "humidity",
-                }
-                self.devices[SENSOR].append(humid_device)
+                self.devices[BINARY_SENSOR].append(motion_device)
             
-            # Возвращаем None, так как мы уже добавили устройства напрямую
-            return None
+            # Возвращаем тип сенсора
+            return {
+                "category": SENSOR,
+                "channels": 1,
+                "sensor_type": "multisensor",
+            }
         
-        # Панели управления
-        elif device_type in [0x0010, 0x0011, 0x0012, 0x0013, 0x0014]:
-            # Определяем количество кнопок по типу устройства
-            buttons_map = {
-                0x0010: 8,  # MPL8.48 - 8 кнопок
-                0x0011: 4,  # MPL4.48 - 4 кнопки
-                0x0012: 4,  # MPT4.46 - 4 кнопки
-                0x0013: 4,  # MPE04.48 - 4 кнопки
-                0x0014: 2,  # MP2B.48 - 2 кнопки
+        # DMX модули
+        elif device_type in [0x0210]:
+            # DMX модули интегрируем как модули освещения
+            return {
+                "category": LIGHT,
+                "channels": 6,  # Предполагаем 6 каналов по умолчанию
             }
-            
-            channels = buttons_map.get(device_type, 4)
-            
-            # Добавляем кнопки как бинарные сенсоры для отслеживания нажатий
-            for i in range(1, channels + 1):
-                button_device = {
-                    "subnet_id": subnet_id,
-                    "device_id": device_id,
-                    "channel": i,
-                    "name": f"{name} Button {i}",
-                    "model": model,
-                    "type": "button",
-                }
-                self.devices[BINARY_SENSOR].append(button_device)
-            
-            # Возвращаем None, так как мы уже добавили устройства напрямую
-            return None
         
         # Шлюзы и интерфейсы
-        elif device_type in [0x0192, 0x0195]:
-            # Не добавляем шлюзы и интерфейсы как устройства управления
+        elif device_type in [0x0192, 0x0195, 0x0196, 0x0197, 0x01A8]:
+            # Пока не добавляем шлюзы в устройства Home Assistant
+            _LOGGER.info(f"Обнаружен шлюз/интерфейс: {model} ({subnet_id}.{device_id})")
+            return None
+        
+        # Логика и безопасность
+        elif device_type in [0x0453, 0x0BE9, 0x0BEA, 0x0BEB]:
+            # Эти устройства пока не интегрируем с Home Assistant
+            _LOGGER.info(f"Обнаружен модуль логики/безопасности: {model} ({subnet_id}.{device_id})")
             return None
         
         # Неизвестные типы устройств
         else:
-            # Добавляем тип в множество неизвестных типов
+            _LOGGER.warning(f"Неизвестный тип устройства: 0x{device_type:04X} ({subnet_id}.{device_id})")
+            # Сохраняем неизвестный тип для отладки
             self.unknown_device_types.add(device_type)
-            _LOGGER.warning(f"Неизвестный тип устройства: 0x{device_type:04X} (ID: {subnet_id}.{device_id})")
-            return {
-                "category": BINARY_SENSOR,  # По умолчанию как бинарный сенсор
-                "channels": 1,
-            }
+            return None
 
     def add_known_devices(self):
         """Добавить известные устройства, которые могут не обнаруживаться автоматически."""
         _LOGGER.info("Добавление известных устройств HDL...")
         
-        # Добавляем модуль управления кондиционером MAC01.431 для адреса 1.9
-        device_info = {
-            "category": CLIMATE,
-            "type": 0x0270,  # MAC01.431
-            "model": "HDL-MAC01.431",
-            "name": "Кондиционер 1.9",
-            "channels": 1,
-            "subnet_id": 1,
-            "device_id": 9,
-            "features": ["temperature", "fan_speed", "mode"]
-        }
+        # Модули кондиционеров MAC01.431
+        ac_modules = [
+            {"subnet_id": 1, "device_id": 4, "name": "Dnevna plafon"},
+            {"subnet_id": 1, "device_id": 5, "name": "Spavaca 1 plafonski"},
+            {"subnet_id": 1, "device_id": 6, "name": "Spavaca 2 plafonski"},
+            {"subnet_id": 1, "device_id": 7, "name": "Master soba plafonski"},
+            {"subnet_id": 1, "device_id": 8, "name": "Podni k. dnevna soba"},
+            {"subnet_id": 1, "device_id": 9, "name": "Podni k. master soba"},
+            {"subnet_id": 1, "device_id": 10, "name": "Podni k. spavaca 1"},
+            {"subnet_id": 1, "device_id": 11, "name": "Spavaca soba 2"}
+        ]
         
-        # Проверяем, что такого устройства еще нет в списке
-        if not any(d.get("subnet_id") == 1 and d.get("device_id") == 9 for d in self.devices[CLIMATE]):
-            _LOGGER.info(f"Добавлен кондиционер MAC01.431 с адресом 1.9")
-            self.devices[CLIMATE].append(device_info)
-        
-        # Добавляем модуль управления кондиционером MAC01.431 для адреса 1.4
-        device_info = {
-            "category": CLIMATE,
-            "type": 0x0270,  # MAC01.431
-            "model": "HDL-MAC01.431",
-            "name": "Кондиционер 1.4",
-            "channels": 1,
-            "subnet_id": 1,
-            "device_id": 4,
-            "features": ["temperature", "fan_speed", "mode"]
-        }
-        
-        # Проверяем, что такого устройства еще нет в списке
-        if not any(d.get("subnet_id") == 1 and d.get("device_id") == 4 for d in self.devices[CLIMATE]):
-            _LOGGER.info(f"Добавлен кондиционер MAC01.431 с адресом 1.4")
-            self.devices[CLIMATE].append(device_info)
+        for ac in ac_modules:
+            device_info = {
+                "category": CLIMATE,
+                "type": 0x0F47,  # MAC01.431
+                "model": "HDL-MAC01.431",
+                "name": ac["name"],
+                "channels": 1,
+                "subnet_id": ac["subnet_id"],
+                "device_id": ac["device_id"],
+                "features": ["temperature", "fan_speed", "mode"]
+            }
             
+            # Проверяем, что такого устройства еще нет в списке
+            if not any(d.get("subnet_id") == ac["subnet_id"] and d.get("device_id") == ac["device_id"] for d in self.devices[CLIMATE]):
+                _LOGGER.info(f"Добавлен кондиционер MAC01.431 с адресом {ac['subnet_id']}.{ac['device_id']} - {ac['name']}")
+                self.devices[CLIMATE].append(device_info)
+        
+        # Модули штор MW02.431
+        curtain_modules = [
+            {"subnet_id": 1, "device_id": 2, "name": "Roletne 1", "channels": 2},
+            {"subnet_id": 1, "device_id": 3, "name": "Roletne 2", "channels": 2}
+        ]
+        
+        for curtain in curtain_modules:
+            for i in range(1, curtain["channels"] + 1):
+                device_info = {
+                    "subnet_id": curtain["subnet_id"],
+                    "device_id": curtain["device_id"],
+                    "channel": i,
+                    "name": f"{curtain['name']} CH{i}",
+                    "model": "HDL-MW02.431",
+                }
+                
+                # Проверяем, что такого устройства еще нет в списке
+                if not any(d.get("subnet_id") == curtain["subnet_id"] and 
+                           d.get("device_id") == curtain["device_id"] and
+                           d.get("channel") == i for d in self.devices[COVER]):
+                    _LOGGER.info(f"Добавлено устройство штор с адресом {curtain['subnet_id']}.{curtain['device_id']} канал {i} - {curtain['name']}")
+                    self.devices[COVER].append(device_info)
+        
+        # Диммер MDT04015.532
+        dimmer_info = {
+            "subnet_id": 1,
+            "device_id": 1,
+            "name": "Dimer",
+            "model": "HDL-MDT04015.532",
+            "channels": 4
+        }
+        
+        for i in range(1, dimmer_info["channels"] + 1):
+            device_info = {
+                "subnet_id": dimmer_info["subnet_id"],
+                "device_id": dimmer_info["device_id"],
+                "channel": i,
+                "name": f"{dimmer_info['name']} CH{i}",
+                "model": dimmer_info["model"],
+            }
+            
+            # Проверяем, что такого устройства еще нет в списке
+            if not any(d.get("subnet_id") == dimmer_info["subnet_id"] and 
+                       d.get("device_id") == dimmer_info["device_id"] and
+                       d.get("channel") == i for d in self.devices[LIGHT]):
+                _LOGGER.info(f"Добавлен диммер канал {i} с адресом {dimmer_info['subnet_id']}.{dimmer_info['device_id']}")
+                self.devices[LIGHT].append(device_info)
+                
+        # Granite Display - экраны управления
+        granite_displays = [
+            {"subnet_id": 1, "device_id": 18, "name": "Dnevna soba"},
+            {"subnet_id": 1, "device_id": 17, "name": "Master soba"},
+            {"subnet_id": 1, "device_id": 25, "name": "Spavaca soba 1"},
+            {"subnet_id": 1, "device_id": 28, "name": "Spavaca soba 2"}
+        ]
+        
+        for display in granite_displays:
+            # Добавляем сенсор температуры для экрана
+            temp_device = {
+                "subnet_id": display["subnet_id"],
+                "device_id": display["device_id"],
+                "channel": 1,
+                "name": f"{display['name']} Temp",
+                "model": "HDL-MPTL4C.48",
+                "type": "temperature",
+            }
+            
+            # Проверяем, что такого устройства еще нет в списке
+            if not any(d.get("subnet_id") == display["subnet_id"] and 
+                       d.get("device_id") == display["device_id"] and
+                       d.get("channel") == 1 and d.get("type") == "temperature" 
+                       for d in self.devices[SENSOR]):
+                _LOGGER.info(f"Добавлен сенсор температуры Granite Display с адресом {display['subnet_id']}.{display['device_id']} - {display['name']}")
+                self.devices[SENSOR].append(temp_device)
+
+        # 2-канальные релейные модули MPR0210-E.40 скрытой установки
+        relay_modules = [
+            {"subnet_id": 1, "device_id": 12, "name": "Dnevna soba 1"},
+            {"subnet_id": 1, "device_id": 13, "name": "Dnevna soba 2"},
+            {"subnet_id": 1, "device_id": 14, "name": "Spavaca soba 1-1"},
+            {"subnet_id": 1, "device_id": 15, "name": "Spavaca soba 1-2"},
+            {"subnet_id": 1, "device_id": 19, "name": "Spavaca soba 2-1"},
+            {"subnet_id": 1, "device_id": 20, "name": "Spavaca soba 2-2"},
+            {"subnet_id": 1, "device_id": 21, "name": "Master soba 1"},
+            {"subnet_id": 1, "device_id": 22, "name": "Master soba 2"},
+            {"subnet_id": 1, "device_id": 23, "name": "Kupatilo 1"},
+            {"subnet_id": 1, "device_id": 24, "name": "Kupatilo 2"}
+        ]
+        
+        for relay in relay_modules:
+            # Каждый модуль имеет 2 канала
+            for i in range(1, 3):
+                device_info = {
+                    "subnet_id": relay["subnet_id"],
+                    "device_id": relay["device_id"],
+                    "channel": i,
+                    "name": f"{relay['name']} CH{i}",
+                    "model": "HDL-MPR0210-E.40",
+                }
+                
+                # Проверяем, что такого устройства еще нет в списке
+                if not any(d.get("subnet_id") == relay["subnet_id"] and 
+                           d.get("device_id") == relay["device_id"] and
+                           d.get("channel") == i for d in self.devices[SWITCH]):
+                    _LOGGER.info(f"Добавлен релейный модуль с адресом {relay['subnet_id']}.{relay['device_id']} канал {i} - {relay['name']}")
+                    self.devices[SWITCH].append(device_info)
+
+        # Модули сухих контактов MSD04T.40
+        dry_contact_modules = [
+            {"subnet_id": 1, "device_id": 30, "name": "Dnevna soba DC"},
+            {"subnet_id": 1, "device_id": 31, "name": "Spavaca 1 DC"},
+            {"subnet_id": 1, "device_id": 32, "name": "Spavaca 2 DC"},
+            {"subnet_id": 1, "device_id": 33, "name": "Master soba DC"},
+            {"subnet_id": 1, "device_id": 34, "name": "Kupatilo DC"},
+            {"subnet_id": 1, "device_id": 35, "name": "Kuhinja DC"},
+            {"subnet_id": 1, "device_id": 36, "name": "Hodnik DC"}
+        ]
+        
+        for dc_module in dry_contact_modules:
+            # Добавляем сенсор температуры
+            temp_device = {
+                "subnet_id": dc_module["subnet_id"],
+                "device_id": dc_module["device_id"],
+                "channel": 1,
+                "name": f"{dc_module['name']} Temp",
+                "model": "HDL-MSD04T.40",
+                "type": "temperature",
+            }
+            
+            # Проверяем, что такого устройства еще нет в списке
+            if not any(d.get("subnet_id") == dc_module["subnet_id"] and 
+                       d.get("device_id") == dc_module["device_id"] and
+                       d.get("channel") == 1 and d.get("type") == "temperature" 
+                       for d in self.devices[SENSOR]):
+                _LOGGER.info(f"Добавлен сенсор температуры модуля сухих контактов с адресом {dc_module['subnet_id']}.{dc_module['device_id']} - {dc_module['name']}")
+                self.devices[SENSOR].append(temp_device)
+            
+            # Добавляем 4 канала сухих контактов
+            for i in range(1, 5):
+                device_info = {
+                    "subnet_id": dc_module["subnet_id"],
+                    "device_id": dc_module["device_id"],
+                    "channel": i,
+                    "name": f"{dc_module['name']} Contact {i}",
+                    "model": "HDL-MSD04T.40",
+                    "type": "dry_contact",
+                }
+                
+                # Проверяем, что такого устройства еще нет в списке
+                if not any(d.get("subnet_id") == dc_module["subnet_id"] and 
+                           d.get("device_id") == dc_module["device_id"] and
+                           d.get("channel") == i and d.get("type") == "dry_contact" 
+                           for d in self.devices[BINARY_SENSOR]):
+                    _LOGGER.info(f"Добавлен сухой контакт с адресом {dc_module['subnet_id']}.{dc_module['device_id']} канал {i} - {dc_module['name']}")
+                    self.devices[BINARY_SENSOR].append(device_info)
+
+        # Модуль RCU (Room Control Unit)
+        rcu_module = {
+            "subnet_id": 1, 
+            "device_id": 40, 
+            "name": "Centralni upravljac",
+            "model": "HDL-MHRCU-Ⅱ.433"
+        }
+        
+        device_info = {
+            "subnet_id": rcu_module["subnet_id"],
+            "device_id": rcu_module["device_id"],
+            "name": rcu_module["name"],
+            "model": rcu_module["model"],
+            "category": CLIMATE,
+            "channels": 1
+        }
+        
+        # Проверяем, что такого устройства еще нет в списке
+        if not any(d.get("subnet_id") == rcu_module["subnet_id"] and 
+                   d.get("device_id") == rcu_module["device_id"] 
+                   for d in self.devices[CLIMATE]):
+            _LOGGER.info(f"Добавлен модуль управления комнатой RCU с адресом {rcu_module['subnet_id']}.{rcu_module['device_id']} - {rcu_module['name']}")
+            self.devices[CLIMATE].append(device_info)
 
 # Создаем альтернативное имя для BusproDiscovery для обратной совместимости
 DeviceDiscovery = BusproDiscovery 
