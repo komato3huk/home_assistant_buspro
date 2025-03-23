@@ -217,28 +217,26 @@ class BusproBinarySensor(BinarySensorEntity):
                 "data": [self._channel],
             }
             
-            # Отправляем запрос через шлюз
-            _LOGGER.debug(f"Отправка запроса данных для бинарного датчика {self._subnet_id}.{self._device_id}.{self._channel}")
-            response = await self._gateway.send_telegram(telegram)
-            _LOGGER.debug(f"Получен ответ: {response}")
-            
-            if response and isinstance(response, dict) and "data" in response and response["data"]:
-                # Для нормальных датчиков, просто используем первый байт ответа
-                if len(response["data"]) > 0:
-                    self._is_on = bool(response["data"][0])
-                    _LOGGER.debug(f"Состояние датчика {self._subnet_id}.{self._device_id}.{self._channel}: {'активен' if self._is_on else 'неактивен'}")
+            try:
+                # Отправляем запрос через шлюз
+                _LOGGER.debug(f"Отправка запроса данных для бинарного датчика {self._subnet_id}.{self._device_id}.{self._channel}")
+                response = await self._gateway.send_telegram(telegram)
+                _LOGGER.debug(f"Получен ответ: {response}")
                 
-                self._available = True
-            else:
-                # Для эмуляции датчика движения при отладке
-                if self._subnet_id == 1 and self._device_id == 9 and self._channel == 1:
-                    # Устанавливаем тестовое значение
-                    self._is_on = False  # Для простоты, можно сделать случайным
-                    _LOGGER.debug(f"Установлено тестовое значение для датчика движения: {'активен' if self._is_on else 'неактивен'}")
+                if response and isinstance(response, dict) and "data" in response and response["data"]:
+                    # Для нормальных датчиков, просто используем первый байт ответа
+                    if len(response["data"]) > 0:
+                        self._is_on = bool(response["data"][0])
+                        _LOGGER.debug(f"Состояние датчика {self._subnet_id}.{self._device_id}.{self._channel}: {'активен' if self._is_on else 'неактивен'}")
+                    
                     self._available = True
                 else:
+                    # Если ответ пустой, сохраняем прежнее состояние, но помечаем как недоступное
                     _LOGGER.warning(f"Не удалось получить данные от бинарного датчика {self._subnet_id}.{self._device_id}.{self._channel}")
                     self._available = False
+            except Exception as e:
+                _LOGGER.error(f"Ошибка при получении данных от датчика {self._subnet_id}.{self._device_id}.{self._channel}: {e}")
+                self._available = False
             
         except Exception as err:
             _LOGGER.error(f"Ошибка при обновлении состояния бинарного датчика {self._subnet_id}.{self._device_id}.{self._channel}: {err}")

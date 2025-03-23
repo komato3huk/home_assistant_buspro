@@ -36,6 +36,14 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_DEVICES): {cv.string: cv.string},
 })
 
+# Коды операций для HDL Buspro
+OPERATE_CODES = {
+    "single_channel": 0x0031,    # Одноканальное управление
+    "scene_control": 0x0002,     # Вызов сцены
+    "read_status": 0x0032,       # Чтение состояния
+    "control_rgb": 0x0031,       # Управление RGB каналами
+}
+
 # Команды для управления светом
 CMD_SINGLE_CHANNEL = 0x0031  # Одноканальное управление
 CMD_SCENE_CONTROL = 0x0002   # Вызов сцены

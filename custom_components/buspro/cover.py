@@ -37,6 +37,12 @@ CURTAIN_CMD_UP = 1    # Движение вверх
 CURTAIN_CMD_DOWN = 2  # Движение вниз
 CURTAIN_CMD_POS = 7   # Установка позиции
 
+# Коды операций для HDL Buspro
+OPERATE_CODES = {
+    "control_curtain": 0x0031,   # Код управления шторами
+    "read_curtain": 0x0032,      # Код чтения состояния штор
+}
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
