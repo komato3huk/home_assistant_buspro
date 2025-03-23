@@ -164,7 +164,7 @@ async def async_setup_platform(
 
 
 class BusproClimate(ClimateEntity):
-    """Representation of an HDL Buspro climate device."""
+    """Representation of a HDL Buspro Climate device."""
 
     def __init__(
         self,
@@ -172,8 +172,8 @@ class BusproClimate(ClimateEntity):
         subnet_id: int,
         device_id: int,
         name: str,
-        model: str,
-        features: List[str],
+        model: str = "Unknown",
+        features: List[str] = ["temperature"],
     ):
         """Initialize the climate device."""
         self.gateway = gateway
@@ -190,6 +190,7 @@ class BusproClimate(ClimateEntity):
         self._target_temp = 20
         self._current_operation = HVACAction.IDLE
         self._available = True
+        self._attr_temperature_unit = UnitOfTemperature.CELSIUS
         
         _LOGGER.info(f"Инициализирован климатический контроллер: {name} ({subnet_id}.{device_id}), модель: {model}")
         

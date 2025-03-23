@@ -113,8 +113,8 @@ class UDPClient:
             # Отправляем буфер
             return await self.send(
                 send_buffer,
-                self.gateway_host,
-                self.gateway_port
+                host=self.target_host,
+                port=self.target_port
             )
         except Exception as e:
             _LOGGER.error(f"Ошибка при отправке сообщения через UDP: {e}")
