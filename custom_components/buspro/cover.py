@@ -196,19 +196,20 @@ class BusproCover(CoverEntity):
         """Открытие шторы."""
         _LOGGER.info(f"Открытие шторы {self._name} ({self._subnet_id}.{self._device_id}.{self._open_channel})")
         
-        # Используем код OPERATION_CURTAIN_SWITCH для управления шторами
-        operation_code = OPERATION_CURTAIN_SWITCH
-        
-        # Формируем команду: [channel, command]
-        data = [self._open_channel, CURTAIN_CMD_UP]
+        # Создаем HDL телеграмму для открытия шторы/жалюзи
+        telegram = {
+            "target_subnet_id": self._subnet_id,
+            "target_device_id": self._device_id,
+            "operate_code": OPERATE_CODES["control_curtain"],
+            "data": [
+                self._open_channel,  # Канал
+                100,  # Значение (100% = полностью открыто)
+            ],
+        }
         
         try:
             # Отправляем команду через шлюз
-            response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target_address
-                [operation_code >> 8, operation_code & 0xFF],  # operation_code
-                data,  # data
-            )
+            response = await self._gateway.send_telegram(telegram)
             
             # Обновляем состояние
             self._is_opening = True
@@ -222,19 +223,20 @@ class BusproCover(CoverEntity):
         """Закрытие шторы."""
         _LOGGER.info(f"Закрытие шторы {self._name} ({self._subnet_id}.{self._device_id}.{self._close_channel})")
         
-        # Используем код OPERATION_CURTAIN_SWITCH для управления шторами
-        operation_code = OPERATION_CURTAIN_SWITCH
-        
-        # Формируем команду: [channel, command]
-        data = [self._close_channel, CURTAIN_CMD_DOWN]
+        # Создаем HDL телеграмму для закрытия шторы/жалюзи
+        telegram = {
+            "target_subnet_id": self._subnet_id,
+            "target_device_id": self._device_id,
+            "operate_code": OPERATE_CODES["control_curtain"],
+            "data": [
+                self._close_channel,  # Канал
+                0,  # Значение (0% = полностью закрыто)
+            ],
+        }
         
         try:
             # Отправляем команду через шлюз
-            response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target_address
-                [operation_code >> 8, operation_code & 0xFF],  # operation_code
-                data,  # data
-            )
+            response = await self._gateway.send_telegram(telegram)
             
             # Обновляем состояние
             self._is_opening = False
@@ -248,19 +250,20 @@ class BusproCover(CoverEntity):
         """Остановка шторы."""
         _LOGGER.info(f"Остановка шторы {self._name} ({self._subnet_id}.{self._device_id}.{self._open_channel})")
         
-        # Используем код OPERATION_CURTAIN_SWITCH для управления шторами
-        operation_code = OPERATION_CURTAIN_SWITCH
-        
-        # Формируем команду: [channel, command]
-        data = [self._open_channel, CURTAIN_CMD_STOP]
+        # Создаем HDL телеграмму для остановки шторы/жалюзи
+        telegram = {
+            "target_subnet_id": self._subnet_id,
+            "target_device_id": self._device_id,
+            "operate_code": OPERATE_CODES["control_curtain"],
+            "data": [
+                self._open_channel,  # Канал
+                0,  # Значение (0% = полностью закрыто)
+            ],
+        }
         
         try:
             # Отправляем команду через шлюз
-            response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target_address
-                [operation_code >> 8, operation_code & 0xFF],  # operation_code
-                data,  # data
-            )
+            response = await self._gateway.send_telegram(telegram)
             
             # Обновляем состояние
             self._is_opening = False
@@ -278,19 +281,20 @@ class BusproCover(CoverEntity):
         position = kwargs[ATTR_POSITION]
         _LOGGER.info(f"Установка позиции шторы {self._name} ({self._subnet_id}.{self._device_id}.{self._channel}) на {position}%")
         
-        # Используем код OPERATION_CURTAIN_SWITCH для управления шторами
-        operation_code = OPERATION_CURTAIN_SWITCH
-        
-        # Формируем команду: [channel, command, position]
-        data = [self._channel, CURTAIN_CMD_POS, position]
+        # Создаем HDL телеграмму для установки позиции шторы
+        telegram = {
+            "target_subnet_id": self._subnet_id,
+            "target_device_id": self._device_id,
+            "operate_code": OPERATE_CODES["control_curtain"],
+            "data": [
+                self._channel,  # Канал
+                position,  # Значение позиции
+            ],
+        }
         
         try:
             # Отправляем команду через шлюз
-            response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target_address
-                [operation_code >> 8, operation_code & 0xFF],  # operation_code
-                data,  # data
-            )
+            response = await self._gateway.send_telegram(telegram)
             
             # Обновляем состояние
             self._position = position
@@ -308,12 +312,12 @@ class BusproCover(CoverEntity):
             
             # Отправляем запрос на получение состояния устройства
             # Код операции 0x0033 - запрос состояния жалюзи
-            response = await self._gateway.send_telegram(
-                self._subnet_id, 
-                self._device_id,
-                0x0033,  # Код операции для запроса состояния жалюзи
-                [0x01]   # Запрос данных о текущем состоянии
-            )
+            response = await self._gateway.send_telegram({
+                "target_subnet_id": self._subnet_id, 
+                "target_device_id": self._device_id,
+                "operate_code": 0x0033,  # Код операции для запроса состояния жалюзи
+                "data": [0x01]   # Запрос данных о текущем состоянии
+            })
             
             if not response:
                 _LOGGER.warning(f"Не получен ответ при запросе состояния жалюзи: {self._name}")

@@ -150,20 +150,20 @@ class BusproSwitch(SwitchEntity):
         """Включение выключателя."""
         _LOGGER.info(f"Включение выключателя {self._name} ({self._subnet_id}.{self._device_id}.{self._channel})")
         
-        # Используем код OPERATION_SINGLE_CHANNEL (0x0031) для включения реле
-        operation_code = OPERATION_SINGLE_CHANNEL
-        
-        # Формируем команду: [channel, value, unused]
-        # value = 100 (полная яркость для релейного выхода, в процентах)
-        data = [self._channel, 100, 0]
+        # Создаем телеграмму для установки состояния реле
+        telegram = {
+            "target_subnet_id": self._subnet_id,
+            "target_device_id": self._device_id,
+            "operate_code": 0x0031,  # Код операции для управления релейным выходом
+            "data": [
+                self._channel,  # Канал
+                100,  # Значение (100% = включено)
+            ],
+        }
         
         try:
-            # Отправляем команду через шлюз
-            response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target_address
-                [operation_code >> 8, operation_code & 0xFF],  # operation_code
-                data,  # data
-            )
+            # Отправляем телеграмму через шлюз
+            await self._gateway.send_telegram(telegram)
             
             # Обновляем состояние
             self._state = True
@@ -176,20 +176,20 @@ class BusproSwitch(SwitchEntity):
         """Выключение выключателя."""
         _LOGGER.info(f"Выключение выключателя {self._name} ({self._subnet_id}.{self._device_id}.{self._channel})")
         
-        # Используем код OPERATION_SINGLE_CHANNEL (0x0031) для выключения реле
-        operation_code = OPERATION_SINGLE_CHANNEL
-        
-        # Формируем команду: [channel, value, unused]
-        # value = 0 (выключено, 0 процентов)
-        data = [self._channel, 0, 0]
+        # Создаем телеграмму для выключения реле
+        telegram = {
+            "target_subnet_id": self._subnet_id,
+            "target_device_id": self._device_id,
+            "operate_code": 0x0031,  # Код операции для управления релейным выходом
+            "data": [
+                self._channel,  # Канал
+                0,  # Значение (0% = выключено)
+            ],
+        }
         
         try:
-            # Отправляем команду через шлюз
-            response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target_address
-                [operation_code >> 8, operation_code & 0xFF],  # operation_code
-                data,  # data
-            )
+            # Отправляем телеграмму через шлюз
+            await self._gateway.send_telegram(telegram)
             
             # Обновляем состояние
             self._state = False
@@ -199,26 +199,26 @@ class BusproSwitch(SwitchEntity):
             _LOGGER.error(f"Ошибка при выключении выключателя {self._name}: {e}")
         
     async def async_update(self) -> None:
-        """Получение нового состояния выключателя."""
+        """Обновление состояния выключателя."""
         try:
-            # Запрашиваем состояние устройства
-            operation_code = OPERATION_READ_STATUS
+            # Создаем телеграмму для запроса состояния
+            telegram = {
+                "target_subnet_id": self._subnet_id,
+                "target_device_id": self._device_id,
+                "operate_code": 0x0031,  # Код операции для запроса состояния
+                "data": [self._channel, 0x01],  # Канал и команда чтения (0x01)
+            }
             
-            # Формируем команду: [channel]
-            data = [self._channel]
+            # Отправляем телеграмму через шлюз
+            response = await self._gateway.send_telegram(telegram)
             
-            # Отправляем запрос статуса через шлюз
-            response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target_address
-                [operation_code >> 8, operation_code & 0xFF],  # operation_code
-                data,  # data
-            )
-            
-            # Обработка ответа
-            # Это заглушка, так как реальный ответ обрабатывается асинхронно через колбэки
-            # В реальной реализации устанавливаем значение, только если получен ответ
-            self._available = True
-            
+            # Обрабатываем ответ
+            if response and isinstance(response, dict) and "data" in response:
+                channel_state = response["data"][0] if len(response["data"]) > 0 else 0
+                self._state = channel_state > 0
+                _LOGGER.debug(f"Состояние выключателя {self._name}: {'ВКЛ' if self._state else 'ВЫКЛ'}")
+            else:
+                _LOGGER.warning(f"Не удалось получить данные о состоянии выключателя {self._name}")
+                
         except Exception as e:
             _LOGGER.error(f"Ошибка при обновлении состояния выключателя {self._name}: {e}")
-            self._available = False

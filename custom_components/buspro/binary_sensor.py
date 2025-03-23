@@ -211,8 +211,8 @@ class BusproBinarySensor(BinarySensorEntity):
             
             # Создаем телеграмму для запроса статуса
             telegram = {
-                "subnet_id": self._subnet_id,
-                "device_id": self._device_id,
+                "target_subnet_id": self._subnet_id,
+                "target_device_id": self._device_id,
                 "operate_code": OPERATION_READ_STATUS,
                 "data": [self._channel],
             }

@@ -964,5 +964,32 @@ class BusproDiscovery:
             _LOGGER.info(f"Добавлен модуль управления комнатой RCU с адресом {rcu_module['subnet_id']}.{rcu_module['device_id']} - {rcu_module['name']}")
             self.devices[CLIMATE].append(device_info)
 
+    async def _send_telegram(self, telegram):
+        """Отправить телеграмму для обнаружения устройства."""
+        if hasattr(self.gateway, 'send_telegram'):
+            return await self.gateway.send_telegram(telegram)
+        
+        return None
+
+    async def send_discovery_telegram(self, subnet_id, device_id, device_type=None):
+        """Отправить телеграмму для обнаружения устройства."""
+        try:
+            _LOGGER.debug(f"Отправка телеграммы обнаружения для устройства {subnet_id}.{device_id}")
+            
+            # Создаем телеграмму для запроса информации об устройстве
+            telegram = {
+                "target_subnet_id": subnet_id,
+                "target_device_id": device_id,
+                "operate_code": 0x0031,  # Код операции для запроса информации
+                "data": [0x01],  # Команда чтения
+            }
+            
+            # Отправляем телеграмму через шлюз
+            return await self._send_telegram(telegram)
+            
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при отправке телеграммы обнаружения: {e}")
+            return None
+
 # Создаем альтернативное имя для BusproDiscovery для обратной совместимости
 DeviceDiscovery = BusproDiscovery 

@@ -198,20 +198,20 @@ class BusproRelayLight(BusproBaseLight):
         """Turn the light on."""
         _LOGGER.info(f"Включение реле {self._name} ({self._subnet_id}.{self._device_id}.{self._channel})")
         
-        # Используем код OPERATION_SINGLE_CHANNEL (0x0031) для включения реле
-        operation_code = OPERATION_SINGLE_CHANNEL
-        
-        # Формируем команду: [channel, value, unused]
-        # value = 100 (полная яркость для релейного выхода, в процентах)
-        data = [self._channel, 100, 0]
+        # Создаем HDL телеграмму для управления одноканальным релейным выходом
+        telegram = {
+            "target_subnet_id": self._subnet_id,
+            "target_device_id": self._device_id,
+            "operate_code": OPERATE_CODES["single_channel"],
+            "data": [
+                self._channel,  # Канал
+                100,  # Значение (100 = включено)
+            ],
+        }
         
         try:
             # Отправляем команду через шлюз
-            response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target_address
-                [operation_code >> 8, operation_code & 0xFF],  # operation_code
-                data,  # data
-            )
+            response = await self._gateway.send_telegram(telegram)
             
             # Обновляем состояние
             self._state = True
@@ -224,20 +224,20 @@ class BusproRelayLight(BusproBaseLight):
         """Turn the light off."""
         _LOGGER.info(f"Выключение реле {self._name} ({self._subnet_id}.{self._device_id}.{self._channel})")
         
-        # Используем код OPERATION_SINGLE_CHANNEL (0x0031) для выключения реле
-        operation_code = OPERATION_SINGLE_CHANNEL
-        
-        # Формируем команду: [channel, value, unused]
-        # value = 0 (выключено, 0 процентов)
-        data = [self._channel, 0, 0]
+        # Создаем HDL телеграмму для управления одноканальным релейным выходом
+        telegram = {
+            "target_subnet_id": self._subnet_id,
+            "target_device_id": self._device_id,
+            "operate_code": OPERATE_CODES["single_channel"],
+            "data": [
+                self._channel,  # Канал
+                0,  # Значение (0 = выключено)
+            ],
+        }
         
         try:
             # Отправляем команду через шлюз
-            response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target_address
-                [operation_code >> 8, operation_code & 0xFF],  # operation_code
-                data,  # data
-            )
+            response = await self._gateway.send_telegram(telegram)
             
             # Обновляем состояние
             self._state = False
@@ -311,20 +311,20 @@ class BusproDimmerLight(BusproBaseLight):
         
         _LOGGER.info(f"Включение диммера {self._name} ({self._subnet_id}.{self._device_id}.{self._channel}) с яркостью {brightness_percent}%")
         
-        # Используем код OPERATION_SINGLE_CHANNEL (0x0031) для управления диммером
-        operation_code = OPERATION_SINGLE_CHANNEL
-        
-        # Формируем команду: [channel, value, unused]
-        # value = яркость в процентах (0-100)
-        data = [self._channel, brightness_percent, 0]
+        # Создаем HDL телеграмму для управления одноканальным релейным выходом
+        telegram = {
+            "target_subnet_id": self._subnet_id,
+            "target_device_id": self._device_id,
+            "operate_code": OPERATE_CODES["single_channel"],
+            "data": [
+                self._channel,  # Канал
+                brightness_percent,  # Значение (яркость в процентах)
+            ],
+        }
         
         try:
             # Отправляем команду через шлюз
-            response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target_address
-                [operation_code >> 8, operation_code & 0xFF],  # operation_code
-                data,  # data
-            )
+            response = await self._gateway.send_telegram(telegram)
             
             # Обновляем состояние
             self._state = True
@@ -338,20 +338,20 @@ class BusproDimmerLight(BusproBaseLight):
         """Turn the light off."""
         _LOGGER.info(f"Выключение диммера {self._name} ({self._subnet_id}.{self._device_id}.{self._channel})")
         
-        # Используем код OPERATION_SINGLE_CHANNEL (0x0031) для выключения диммера
-        operation_code = OPERATION_SINGLE_CHANNEL
-        
-        # Формируем команду: [channel, value, unused]
-        # value = 0 (выключено, 0 процентов)
-        data = [self._channel, 0, 0]
+        # Создаем HDL телеграмму для управления одноканальным релейным выходом
+        telegram = {
+            "target_subnet_id": self._subnet_id,
+            "target_device_id": self._device_id,
+            "operate_code": OPERATE_CODES["single_channel"],
+            "data": [
+                self._channel,  # Канал
+                0,  # Значение (0 = выключено)
+            ],
+        }
         
         try:
             # Отправляем команду через шлюз
-            response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target_address
-                [operation_code >> 8, operation_code & 0xFF],  # operation_code
-                data,  # data
-            )
+            response = await self._gateway.send_telegram(telegram)
             
             # Обновляем состояние
             self._state = False
@@ -368,12 +368,12 @@ class BusproDimmerLight(BusproBaseLight):
             
             # Отправляем запрос на получение состояния устройства
             # Код операции 0x0031 - запрос состояния светильника
-            response = await self._gateway.send_telegram(
-                self._subnet_id, 
-                self._device_id,
-                0x0031,  # Код операции для запроса состояния светильника
-                [self._channel, 0x01]  # Канал и запрос данных о текущем состоянии
-            )
+            response = await self._gateway.send_telegram({
+                "target_subnet_id": self._subnet_id, 
+                "target_device_id": self._device_id,
+                "operate_code": 0x0031,  # Код операции для запроса состояния светильника
+                "data": [self._channel, 0x01]  # Канал и запрос данных о текущем состоянии
+            })
             
             if not response:
                 _LOGGER.warning(f"Не получен ответ при запросе состояния диммера: {self._name}")
@@ -457,10 +457,13 @@ class BusproRGBLight(BusproBaseLight):
             try:
                 # Создаем телеграмму для каждого цветового канала
                 telegram = {
-                    "subnet_id": self._subnet_id,
-                    "device_id": self._device_id,
-                    "operate_code": OPERATION_WRITE,
-                    "data": [CMD_SINGLE_CHANNEL, self._channel + color_offset, color_value],
+                    "target_subnet_id": self._subnet_id,
+                    "target_device_id": self._device_id,
+                    "operate_code": OPERATE_CODES["control_rgb"],
+                    "data": [
+                        self._channel + color_offset,
+                        color_value,
+                    ],
                 }
                 
                 # Отправляем телеграмму через шлюз
@@ -483,10 +486,13 @@ class BusproRGBLight(BusproBaseLight):
             try:
                 # Создаем телеграмму для каждого цветового канала
                 telegram = {
-                    "subnet_id": self._subnet_id,
-                    "device_id": self._device_id,
-                    "operate_code": OPERATION_WRITE,
-                    "data": [CMD_SINGLE_CHANNEL, self._channel + color_offset, 0],  # 0% - выключено
+                    "target_subnet_id": self._subnet_id,
+                    "target_device_id": self._device_id,
+                    "operate_code": OPERATE_CODES["control_rgb"],
+                    "data": [
+                        self._channel + color_offset,
+                        0,
+                    ],
                 }
                 
                 # Отправляем телеграмму через шлюз
@@ -510,8 +516,8 @@ class BusproRGBLight(BusproBaseLight):
             for color_offset in range(3):  # R, G, B
                 # Создаем телеграмму для запроса статуса
                 telegram = {
-                    "subnet_id": self._subnet_id,
-                    "device_id": self._device_id,
+                    "target_subnet_id": self._subnet_id,
+                    "target_device_id": self._device_id,
                     "operate_code": CMD_SINGLE_CHANNEL,
                     "data": [self._channel + color_offset],
                 }

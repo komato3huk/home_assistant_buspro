@@ -272,11 +272,10 @@ class BusproClimate(ClimateEntity):
             
             # Создаем телеграмму для установки температуры
             telegram = {
-                "subnet_id": self.subnet_id,
-                "device_id": self.device_id,
-                "operate_code": OPERATE_CODES["control_floor_heating"],
+                "target_subnet_id": self.subnet_id,
+                "target_device_id": self.device_id,
+                "operate_code": 0x0032,  # Код операции для управления устройством
                 "data": [
-                    1,  # temperature_type (Celsius)
                     0,  # current_temperature (не меняется при установке)
                     1 if self._hvac_mode != HVACMode.OFF else 0,  # status (on/off)
                     1,  # mode (Normal)
@@ -311,11 +310,10 @@ class BusproClimate(ClimateEntity):
         try:
             # Создаем телеграмму для установки режима
             telegram = {
-                "subnet_id": self.subnet_id,
-                "device_id": self.device_id,
+                "target_subnet_id": self.subnet_id,
+                "target_device_id": self.device_id,
                 "operate_code": OPERATE_CODES["control_floor_heating"],
                 "data": [
-                    1,  # temperature_type (Celsius)
                     0,  # current_temperature (не меняется при установке)
                     status,  # status (on/off)
                     1,  # mode (Normal)
@@ -355,11 +353,12 @@ class BusproClimate(ClimateEntity):
             
             _LOGGER.debug(f"Отправка команды установки режима вентилятора для MAC01.431: {data}")
             
-            response = await self.gateway.send_message(
-                [self.subnet_id, self.device_id, 0, 0],  # target_address
-                [operation_code >> 8, operation_code & 0xFF],  # operation_code
-                data,  # data
-            )
+            response = await self.gateway.send_telegram({
+                "target_subnet_id": self.subnet_id,
+                "target_device_id": self.device_id,
+                "operate_code": 0x0033,
+                "data": data
+            })
             
             self.async_write_ha_state()
         except Exception as e:
@@ -373,12 +372,12 @@ class BusproClimate(ClimateEntity):
             
             # Отправляем запрос на получение состояния устройства
             # Код операции 0x0032 - запрос состояния
-            response = await self.gateway.send_telegram(
-                self.subnet_id, 
-                self.device_id,
-                0x0032,  # Код операции для запроса состояния
-                [0x01]   # Запрос данных о текущем состоянии
-            )
+            response = await self.gateway.send_telegram({
+                "target_subnet_id": self.subnet_id, 
+                "target_device_id": self.device_id,
+                "operate_code": 0x0032,  # Код операции для запроса состояния
+                "data": [0x01]   # Запрос данных о текущем состоянии
+            })
             
             if not response:
                 _LOGGER.warning(f"Не получен ответ при запросе состояния климатического устройства: {self.name}")
@@ -531,11 +530,12 @@ class BusproAirConditioner(ClimateEntity):
             
             _LOGGER.debug(f"Отправка команды установки температуры для MAC01.431: {data}")
             
-            response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target_address
-                [operation_code >> 8, operation_code & 0xFF],  # operation_code
-                data,  # data
-            )
+            response = await self._gateway.send_telegram({
+                "target_subnet_id": self._subnet_id,
+                "target_device_id": self._device_id,
+                "operate_code": 0x0033,
+                "data": data
+            })
             
             self.async_write_ha_state()
             
@@ -585,11 +585,12 @@ class BusproAirConditioner(ClimateEntity):
             
             _LOGGER.debug(f"Отправка команды установки режима для MAC01.431: {data}")
             
-            response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target_address
-                [operation_code >> 8, operation_code & 0xFF],  # operation_code
-                data,  # data
-            )
+            response = await self._gateway.send_telegram({
+                "target_subnet_id": self._subnet_id,
+                "target_device_id": self._device_id,
+                "operate_code": 0x0033,
+                "data": data
+            })
             
             self.async_write_ha_state()
             
@@ -615,11 +616,12 @@ class BusproAirConditioner(ClimateEntity):
             
             _LOGGER.debug(f"Отправка команды установки режима вентилятора для MAC01.431: {data}")
             
-            response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target_address
-                [operation_code >> 8, operation_code & 0xFF],  # operation_code
-                data,  # data
-            )
+            response = await self._gateway.send_telegram({
+                "target_subnet_id": self._subnet_id,
+                "target_device_id": self._device_id,
+                "operate_code": 0x0033,
+                "data": data
+            })
             
             self.async_write_ha_state()
             
@@ -634,11 +636,12 @@ class BusproAirConditioner(ClimateEntity):
             
             _LOGGER.debug(f"Запрос статуса кондиционера MAC01.431: {self._subnet_id}.{self._device_id}")
             
-            response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target_address
-                [operation_code >> 8, operation_code & 0xFF],  # operation_code
-                [],  # data
-            )
+            response = await self._gateway.send_telegram({
+                "target_subnet_id": self._subnet_id,
+                "target_device_id": self._device_id,
+                "operate_code": 0x0032,
+                "data": [0x01]
+            })
             
             # Обрабатываем ответ, если получили данные
             if response and isinstance(response, dict) and "data" in response:
