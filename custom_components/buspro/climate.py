@@ -21,7 +21,6 @@ from homeassistant.components.climate import (
     PRESET_AWAY,
     PRESET_HOME,
     PRESET_SLEEP,
-    FanMode,
 )
 from homeassistant.components.climate.const import ATTR_PRESET_MODE
 from homeassistant.const import (
@@ -58,6 +57,12 @@ OPERATE_CODES = {
     "read_floor_heating": 0x1944,  # ReadFloorHeatingStatus
     "control_floor_heating": 0x1946,  # ControlFloorHeatingStatus
 }
+
+# Константы для режимов вентилятора
+FAN_MODE_AUTO = "auto"
+FAN_MODE_LOW = "low"
+FAN_MODE_MEDIUM = "medium"
+FAN_MODE_HIGH = "high"
 
 PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_DEVICES):
@@ -128,7 +133,7 @@ async def async_setup_platform(
         return
     
     entities = []
-    
+
     for device_config in config[CONF_DEVICES]:
         address = device_config[CONF_ADDRESS]
         name = device_config[CONF_NAME]
@@ -180,7 +185,7 @@ class BusproClimate(ClimateEntity):
         
         # Состояния
         self._hvac_mode = HVACMode.OFF
-        self._fan_mode = FanMode.MEDIUM
+        self._fan_mode = FAN_MODE_MEDIUM
         self._temperature = 20
         self._target_temp = 20
         self._current_operation = HVACAction.IDLE
@@ -220,32 +225,32 @@ class BusproClimate(ClimateEntity):
     def name(self) -> str:
         """Return the name of the climate device."""
         return self._name
-        
+
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
         return self._available
-        
+
     @property
     def hvac_mode(self) -> HVACMode:
         """Return hvac operation mode."""
         return self._hvac_mode
-        
+
     @property
     def hvac_action(self) -> HVACAction:
         """Return the current running hvac operation."""
         return self._current_operation
-        
+
     @property
     def fan_mode(self) -> HVACMode:
         """Return the fan setting."""
         return self._fan_mode
-        
+
     @property
     def current_temperature(self) -> Optional[float]:
         """Return the current temperature."""
         return self._temperature
-        
+
     @property
     def target_temperature(self) -> Optional[float]:
         """Return the temperature we try to reach."""
@@ -332,7 +337,7 @@ class BusproClimate(ClimateEntity):
             
     async def async_set_fan_mode(self, fan_mode: str) -> None:
         """Set fan mode."""
-        if fan_mode not in [FanMode.AUTO, FanMode.LOW, FanMode.MEDIUM, FanMode.HIGH]:
+        if fan_mode not in [FAN_MODE_AUTO, FAN_MODE_LOW, FAN_MODE_MEDIUM, FAN_MODE_HIGH]:
             _LOGGER.warning(f"Неподдерживаемый режим вентилятора: {fan_mode}")
             return
             
@@ -356,7 +361,6 @@ class BusproClimate(ClimateEntity):
             )
             
             self.async_write_ha_state()
-            
         except Exception as e:
             _LOGGER.error(f"Ошибка при установке режима вентилятора для MAC01.431: {e}")
     
@@ -445,13 +449,13 @@ class BusproClimate(ClimateEntity):
 
     def _get_fan_mode_code(self, fan_mode: str) -> int:
         """Получить код режима вентилятора для отправки на устройство."""
-        if fan_mode == FanMode.AUTO:
+        if fan_mode == FAN_MODE_AUTO:
             return 0
-        elif fan_mode == FanMode.LOW:
+        elif fan_mode == FAN_MODE_LOW:
             return 1
-        elif fan_mode == FanMode.MEDIUM:
+        elif fan_mode == FAN_MODE_MEDIUM:
             return 2
-        elif fan_mode == FanMode.HIGH:
+        elif fan_mode == FAN_MODE_HIGH:
             return 3
         return 0  # Auto by default
 
@@ -521,12 +525,12 @@ class BusproAirConditioner(ClimateEntity):
     def unique_id(self) -> str:
         """Return the unique ID of the climate device."""
         return self._attr_unique_id
-        
+
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
         return self._available
-        
+
     @property
     def hvac_mode(self) -> HVACMode:
         """Return hvac operation mode."""
@@ -536,12 +540,12 @@ class BusproAirConditioner(ClimateEntity):
     def hvac_action(self) -> HVACAction:
         """Return the current running hvac operation."""
         return self._hvac_action
-        
+
     @property
     def fan_mode(self) -> Optional[str]:
         """Return the fan setting."""
         return self._fan_mode
-        
+
     @property
     def current_temperature(self) -> Optional[float]:
         """Return the current temperature."""
@@ -732,7 +736,6 @@ class BusproAirConditioner(ClimateEntity):
             else:
                 _LOGGER.warning(f"Не удалось получить данные от MAC01.431: {response}")
                 self._available = False
-            
         except Exception as e:
             _LOGGER.error(f"Ошибка при обновлении состояния MAC01.431: {e}")
             self._available = False

@@ -15,7 +15,7 @@ from homeassistant.components.light import (
     ATTR_RGB_COLOR,
     PLATFORM_SCHEMA,
     ColorMode,
-    LightEntity,
+    LightEntity, 
     LightEntityFeature,
 )
 from homeassistant.const import (CONF_NAME, CONF_DEVICES)
@@ -147,17 +147,17 @@ class BusproBaseLight(LightEntity):
         self._available = True
         # Создаем уникальный ID, включающий все параметры устройства
         self._unique_id = f"light_{subnet_id}_{device_id}_{channel}"
-        
+
     @property
     def name(self) -> str:
         """Return the name of the light."""
         return self._name
-        
+
     @property
     def is_on(self) -> bool:
         """Return true if light is on."""
         return self._state
-        
+
     @property
     def available(self) -> bool:
         """Return True if entity is available."""
@@ -412,7 +412,7 @@ class BusproRGBLight(BusproBaseLight):
     def brightness(self) -> Optional[int]:
         """Return the brightness of this light between 0..255."""
         return self._brightness
-        
+
     @property
     def rgb_color(self) -> Optional[Tuple[int, int, int]]:
         """Return the rgb color value [int, int, int]."""
