@@ -195,6 +195,9 @@ class BusproClimate(ClimateEntity):
         # Добавляем поддерживаемые режимы HVAC
         self._attr_hvac_modes = [HVACMode.OFF, HVACMode.HEAT, HVACMode.COOL]
         
+        # Добавляем поддерживаемые режимы вентилятора
+        self._attr_fan_modes = [FAN_MODE_AUTO, FAN_MODE_LOW, FAN_MODE_MEDIUM, FAN_MODE_HIGH]
+        
         _LOGGER.info(f"Инициализирован климатический контроллер: {name} ({subnet_id}.{device_id}), модель: {model}")
         
     async def async_added_to_hass(self):

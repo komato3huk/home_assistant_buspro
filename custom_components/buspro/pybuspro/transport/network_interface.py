@@ -285,7 +285,7 @@ class NetworkInterface:
                 return None
             
             # Создаем буфер для отправки
-            send_buffer = self._th.build_send_buffer(message)
+            send_buffer = self._build_send_buffer(message)
             
             if not send_buffer:
                 _LOGGER.error("Не удалось создать буфер отправки из сообщения: %s", message)
@@ -321,59 +321,106 @@ class NetworkInterface:
             _LOGGER.error(traceback.format_exc())
             return None
 
-    async def send_telegram(
-        self, target_subnet_id=None, target_device_id=None, operate_code=None, data=None
-    ) -> bool:
-        """Send a telegram to the HDL Buspro gateway.
-        
-        Args:
-            target_subnet_id: Target subnet ID or full telegram dict
-            target_device_id: Target device ID
-            operate_code: Operation code
-            data: Data to send
-            
-        Returns:
-            bool: True if the message was sent successfully, False otherwise
-        """
-        if not hasattr(self, '_initialized') or not self._initialized:
-            _LOGGER.error("Network interface not initialized, cannot send telegram")
-            return False
-            
+    async def send_telegram(self, telegram):
+        """Send a telegram to the HDL Buspro network."""
         try:
-            # Проверяем, передан ли словарь телеграммы или отдельные параметры
-            if isinstance(target_subnet_id, dict):
-                # Если первый аргумент - словарь, используем его как телеграмму
-                telegram = target_subnet_id
-            else:
-                # Строим телеграмму из отдельных параметров
-                telegram = {
-                    "source_subnet_id": self.device_subnet_id,
-                    "source_device_id": self.device_id,
-                    "target_subnet_id": target_subnet_id,
-                    "target_device_id": target_device_id,
-                    "operate_code": operate_code,
-                    "data": data or [],
-                }
-            
-            # Логируем отправку команды через шлюз
-            _LOGGER.debug(
-                f"Отправка команды через шлюз ({self.hdl_gateway_host}:{self.hdl_gateway_port}): "
-                f"Subnet={telegram.get('target_subnet_id')}, DeviceID={telegram.get('target_device_id')}, "
-                f"OpCode=0x{telegram.get('operate_code', 0):04X}, Data={telegram.get('data')}"
-            )
-            
-            # Отправляем сообщение
-            result = await self._send_message(telegram)
-            if not result:
-                _LOGGER.warning(
-                    f"Не удалось отправить телеграмму устройству {telegram.get('target_subnet_id')}.{telegram.get('target_device_id')} "
-                    f"с кодом операции 0x{telegram.get('operate_code', 0):04X}"
-                )
+            # Выполняем проверку и дополнение данных телеграммы
+            if "target_subnet_id" not in telegram:
+                _LOGGER.error("Отсутствует target_subnet_id в телеграмме")
                 return False
                 
-            return True
-        except Exception as exc:
-            _LOGGER.error(
-                f"Ошибка при отправке телеграммы: {exc}"
-            )
+            if "target_device_id" not in telegram:
+                _LOGGER.error("Отсутствует target_device_id в телеграмме")
+                return False
+                
+            if "operate_code" not in telegram:
+                _LOGGER.error("Отсутствует operate_code в телеграмме")
+                return False
+                
+            # Убедимся, что в телеграмме есть все необходимые поля
+            complete_telegram = {
+                "target_subnet_id": telegram.get("target_subnet_id"),
+                "target_device_id": telegram.get("target_device_id"),
+                "source_subnet_id": telegram.get("source_subnet_id", self.device_subnet_id),
+                "source_device_id": telegram.get("source_device_id", self.device_id),
+                "operate_code": telegram.get("operate_code"),
+                "data": telegram.get("data", []),
+            }
+            
+            # Преобразуем телеграмму в байтовый буфер для отправки
+            buffer = self._build_send_buffer(complete_telegram)
+            if not buffer:
+                _LOGGER.error("Не удалось создать буфер отправки для телеграммы")
+                return False
+                
+            # Логируем отправку
+            _LOGGER.debug(f"Отправка телеграммы: {complete_telegram}")
+            
+            # Отправляем данные через UDP сокет
+            try:
+                with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+                    # Устанавливаем таймаут для сокета
+                    sock.settimeout(1.0)
+                    
+                    # Повторные попытки отправки при ошибке
+                    max_retries = 3
+                    for retry in range(max_retries):
+                        try:
+                            sent = sock.sendto(buffer, (self.hdl_gateway_host, self.hdl_gateway_port))
+                            if sent:
+                                _LOGGER.debug(f"Отправлено {sent} байт на {self.hdl_gateway_host}:{self.hdl_gateway_port}")
+                                return True
+                        except (socket.timeout, ConnectionError, OSError) as e:
+                            _LOGGER.warning(f"Ошибка отправки (попытка {retry+1}/{max_retries}): {e}")
+                            if retry < max_retries - 1:
+                                await asyncio.sleep(0.2)  # Небольшая задержка перед повторной попыткой
+                            else:
+                                return False
+                                
+                    # Если мы здесь, значит все попытки не удались
+                    return False
+            except Exception as e:
+                _LOGGER.error(f"Ошибка сокета при отправке телеграммы: {e}")
+                return False
+                
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при отправке телеграммы: {e}")
+            import traceback
+            _LOGGER.error(traceback.format_exc())
             return False
+
+    def _build_send_buffer(self, telegram):
+        """Build a buffer to send via UDP."""
+        try:
+            # Формат HDL шапки: "HDLMIRACLEBE"
+            hdl_header = bytearray([0x48, 0x44, 0x4C, 0x4D, 0x49, 0x52, 0x41, 0x43, 0x4C, 0x45, 0x42, 0x45])
+            
+            # Формируем тело сообщения
+            message = bytearray()
+            message.append(telegram.get("source_subnet_id", 0))  # Подсеть отправителя
+            message.append(telegram.get("target_subnet_id", 0))  # Подсеть получателя
+            message.append(telegram.get("source_device_id", 0))  # ID устройства отправителя
+            message.append(telegram.get("target_device_id", 0))  # ID устройства получателя
+            
+            # Добавляем код операции (2 байта)
+            operate_code = telegram.get("operate_code", 0)
+            message.append((operate_code >> 8) & 0xFF)  # Старший байт
+            message.append(operate_code & 0xFF)         # Младший байт
+            
+            # Добавляем данные
+            data = telegram.get("data", [])
+            if data:
+                if isinstance(data, list) or isinstance(data, bytearray):
+                    message.extend(data)
+                else:
+                    message.append(data)
+            
+            # Добавляем контрольную сумму (пока не реализовано)
+            
+            # Формируем полный буфер для отправки
+            buffer = hdl_header + bytearray([len(message)]) + message
+            
+            return buffer
+        except Exception as e:
+            _LOGGER.error(f"Ошибка при создании буфера отправки: {e}")
+            return None
