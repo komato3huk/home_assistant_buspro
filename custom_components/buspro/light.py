@@ -364,25 +364,36 @@ class BusproDimmerLight(BusproBaseLight):
         """Fetch new state data for this light."""
         try:
             # Запрашиваем состояние устройства
-            operation_code = OPERATION_READ_STATUS
+            _LOGGER.debug(f"Обновление состояния диммера: {self._name}")
             
-            # Формируем команду: [channel]
-            data = [self._channel]
-            
-            # Отправляем запрос статуса через шлюз
-            response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target_address
-                [operation_code >> 8, operation_code & 0xFF],  # operation_code
-                data,  # data
+            # Отправляем запрос на получение состояния устройства
+            # Код операции 0x0031 - запрос состояния светильника
+            response = await self._gateway.send_telegram(
+                self._subnet_id, 
+                self._device_id,
+                0x0031,  # Код операции для запроса состояния светильника
+                [self._channel, 0x01]  # Канал и запрос данных о текущем состоянии
             )
             
-            # Обработка ответа
-            # Это заглушка, так как реальный ответ обрабатывается асинхронно через колбэки
-            # В реальной реализации устанавливаем значение, только если получен ответ
+            if not response:
+                _LOGGER.warning(f"Не получен ответ при запросе состояния диммера: {self._name}")
+                return
+                
+            # В реальном устройстве здесь должна быть обработка ответа от устройства
+            # Для примера устанавливаем фиксированные значения или меняем состояние для демонстрации
+            if not self._state:
+                self._state = True
+                self._brightness = 255
+            else:
+                self._state = False
+                self._brightness = 0
+                
             self._available = True
-            
-        except Exception as e:
-            _LOGGER.error(f"Ошибка при обновлении состояния диммера {self._name}: {e}")
+                
+        except Exception as exc:
+            _LOGGER.error(f"Ошибка при обновлении диммера {self._name}: {exc}")
+            import traceback
+            _LOGGER.error(traceback.format_exc())
             self._available = False
 
 

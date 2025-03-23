@@ -2,12 +2,12 @@
 import logging
 import asyncio
 import socket
+import time
 from typing import Tuple, Dict, Any, List, Callable, Optional
 from .udp_client import UDPClient
 from ..helpers.telegram_helper import TelegramHelper
 # from ..devices.control import Control
 import binascii
-import time
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -41,6 +41,7 @@ class NetworkInterface:
         self._udp_client = None
         self._read_task = None
         self._th = TelegramHelper()
+        self._initialized = False
         self._init_udp_client()
         
     def _init_udp_client(self):
@@ -81,22 +82,36 @@ class NetworkInterface:
             _LOGGER.error(traceback.format_exc())
 
     async def start(self):
-        """Start the network interface."""
+        """Start network interface."""
+        if self._running:
+            _LOGGER.warning("Network interface is already running")
+            return
+            
         try:
-            # Initialize UDP client уже не нужно, так как мы сделали это в _init_udp_client
-            await self._udp_client.start()
+            _LOGGER.info(f"Starting HDL Buspro network interface")
             
+            # Запуск UDP клиента
+            if self._udp_client:
+                await self._udp_client.start()
+                
             self._running = True
+            self._initialized = True
             self._connected = True
-            self._read_task = asyncio.create_task(self._read_loop())
             
-            _LOGGER.info("Network interface started, connected to %s:%s", 
-                        self.hdl_gateway_host, self.hdl_gateway_port)
+            # Создаем задачу чтения данных
+            try:
+                self._read_task = asyncio.create_task(self._read_loop())
+            except Exception as e:
+                _LOGGER.error(f"Ошибка при создании задачи чтения: {e}")
+            
+            _LOGGER.info(f"HDL Buspro network interface started, connected to {self.hdl_gateway_host}:{self.hdl_gateway_port}")
+            
             return True
-        except Exception as err:
-            _LOGGER.error("Failed to start network interface: %s", err)
+        except Exception as e:
+            _LOGGER.error(f"Error starting network interface: {e}")
             self._running = False
             self._connected = False
+            self._initialized = False
             return False
     
     async def stop(self):
@@ -263,6 +278,11 @@ class NetworkInterface:
             if not self._udp_client:
                 _LOGGER.error("Невозможно отправить сообщение: UDP клиент не инициализирован")
                 return None
+                
+            # Проверяем, что у сообщения есть все необходимые поля
+            if "target_subnet_id" not in message or "target_device_id" not in message:
+                _LOGGER.error("В сообщении отсутствуют обязательные поля target_subnet_id или target_device_id")
+                return None
             
             # Создаем буфер для отправки
             send_buffer = self._th.build_send_buffer(message)
@@ -301,44 +321,54 @@ class NetworkInterface:
             _LOGGER.error(traceback.format_exc())
             return None
 
-    async def send_telegram(self, telegram):
-        """Send a telegram to the HDL Buspro network.
+    async def send_telegram(
+        self, target_subnet_id, target_device_id, operate_code, data=None
+    ) -> bool:
+        """Send a telegram to the HDL Buspro gateway.
         
         Args:
-            telegram: Telegram dictionary with subnet_id, device_id, operate_code and data.
+            target_subnet_id: Target subnet ID
+            target_device_id: Target device ID
+            operate_code: Operation code
+            data: Data to send
             
         Returns:
-            Dict[str, Any]: Response telegram or None if no response.
+            bool: True if the message was sent successfully, False otherwise
         """
-        try:
-            _LOGGER.debug(f"Отправка телеграммы через шлюз {self.hdl_gateway_host}:{self.hdl_gateway_port}")
+        if not hasattr(self, '_initialized') or not self._initialized:
+            _LOGGER.error("Network interface not initialized, cannot send telegram")
+            return False
             
-            # Проверяем и добавляем необходимые поля для отправки телеграммы
-            if "subnet_id" in telegram and "target_subnet_id" not in telegram:
-                telegram["target_subnet_id"] = telegram["subnet_id"]
-                
-            if "device_id" in telegram and "target_device_id" not in telegram:
-                telegram["target_device_id"] = telegram["device_id"]
-                
-            if "source_subnet_id" not in telegram:
-                telegram["source_subnet_id"] = self.device_subnet_id
-                
-            if "source_device_id" not in telegram:
-                telegram["source_device_id"] = self.device_id
-                
-            # Логируем информацию о телеграмме
+        try:
+            # Строим телеграмму
+            telegram = {
+                "source_subnet_id": self.device_subnet_id,
+                "source_device_id": self.device_id,
+                "target_subnet_id": target_subnet_id,
+                "target_device_id": target_device_id,
+                "operate_code": operate_code,
+                "data": data or [],
+            }
+            
+            # Логируем отправку команды через шлюз
             _LOGGER.debug(
-                f"Телеграмма для отправки: код операции 0x{telegram.get('operate_code', 0):04X}, "
-                f"цель: {telegram.get('target_subnet_id', 0)}.{telegram.get('target_device_id', 0)}, "
-                f"данные: {telegram.get('data', [])}"
+                f"Отправка команды через шлюз ({self.hdl_gateway_host}:{self.hdl_gateway_port}): "
+                f"Subnet={target_subnet_id}, DeviceID={target_device_id}, "
+                f"OpCode=0x{operate_code:04X}, Data={data}"
             )
             
-            # Отправляем телеграмму
+            # Отправляем сообщение
             result = await self._send_message(telegram)
-            return result
-            
-        except Exception as e:
-            _LOGGER.error(f"Ошибка при отправке телеграммы: {e}")
-            import traceback
-            _LOGGER.error(traceback.format_exc())
-            return None
+            if not result:
+                _LOGGER.warning(
+                    f"Не удалось отправить телеграмму устройству {target_subnet_id}.{target_device_id} "
+                    f"с кодом операции 0x{operate_code:04X}"
+                )
+                return False
+                
+            return True
+        except Exception as exc:
+            _LOGGER.error(
+                f"Ошибка при отправке телеграммы устройству {target_subnet_id}.{target_device_id}: {exc}"
+            )
+            return False

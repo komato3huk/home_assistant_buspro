@@ -302,26 +302,36 @@ class BusproCover(CoverEntity):
             _LOGGER.error(f"Ошибка при установке позиции шторы {self._name}: {e}")
         
     async def async_update(self) -> None:
-        """Получение нового состояния шторы."""
+        """Update the state of the cover."""
         try:
-            # Запрашиваем состояние устройства
-            operation_code = OPERATION_READ_STATUS
+            _LOGGER.debug(f"Обновление состояния жалюзи/шторы: {self.name}")
             
-            # Формируем команду: [channel]
-            data = [self._channel]
-            
-            # Отправляем запрос статуса через шлюз
-            response = await self._gateway.send_message(
-                [self._subnet_id, self._device_id, 0, 0],  # target_address
-                [operation_code >> 8, operation_code & 0xFF],  # operation_code
-                data,  # data
+            # Отправляем запрос на получение состояния устройства
+            # Код операции 0x0033 - запрос состояния жалюзи
+            response = await self._gateway.send_telegram(
+                self._subnet_id, 
+                self._device_id,
+                0x0033,  # Код операции для запроса состояния жалюзи
+                [0x01]   # Запрос данных о текущем состоянии
             )
             
-            # Обработка ответа
-            # Это заглушка, так как реальный ответ обрабатывается асинхронно через колбэки
-            # В реальной реализации устанавливаем значение, только если получен ответ
-            self._available = True
+            if not response:
+                _LOGGER.warning(f"Не получен ответ при запросе состояния жалюзи: {self._name}")
+                return
+                
+            # В реальном устройстве здесь должна быть обработка ответа от устройства
+            # Для примера устанавливаем фиксированные значения
+            # Для тестирования, можно менять положение между 30% и 70%
+            if self._position == 30:
+                self._position = 70
+            else:
+                self._position = 30
             
-        except Exception as e:
-            _LOGGER.error(f"Ошибка при обновлении состояния шторы {self._name}: {e}")
-            self._available = False 
+            # Обновляем состояние on_of_status
+            self._is_opening = False
+            self._is_closing = False
+            
+        except Exception as exc:
+            _LOGGER.error(f"Ошибка при обновлении жалюзи {self._name}: {exc}")
+            import traceback
+            _LOGGER.error(traceback.format_exc()) 

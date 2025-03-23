@@ -24,12 +24,12 @@ class UDPClient:
             data_callback: callback function for received data
             target_port: target port for sending messages
         """
-        self.parent = parent
-        self.data_callback = data_callback
-        self.target_host = target_host
-        self.target_port = target_port
-        self.transport = None
-        self.protocol = None
+        self._parent = parent
+        self._data_callback = data_callback
+        self._host = target_host
+        self._port = target_port
+        self._transport = None
+        self._protocol = None
 
     async def start(self):
         """Start UDP client."""
@@ -38,8 +38,8 @@ class UDPClient:
         try:
             # Создаем протокол и транспорт
             loop = asyncio.get_event_loop()
-            self.transport, self.protocol = await loop.create_datagram_endpoint(
-                lambda: self._UDPClientProtocol(self.data_callback),
+            self._transport, self._protocol = await loop.create_datagram_endpoint(
+                lambda: self._UDPClientProtocol(self._data_callback),
                 local_addr=("0.0.0.0", 0),
                 allow_broadcast=True,
             )
@@ -56,30 +56,53 @@ class UDPClient:
         """Stop UDP client."""
         _LOGGER.info(f"Остановка UDP клиента")
         
-        if self.transport:
-            self.transport.close()
-            self.transport = None
-            self.protocol = None
+        if self._transport:
+            self._transport.close()
+            self._transport = None
+            self._protocol = None
             
         _LOGGER.info(f"UDP клиент остановлен")
         return True
 
-    async def send(self, data, host=None, port=None) -> bool:
-        """Send data to target host."""
-        if not self.transport:
-            _LOGGER.error(f"UDP клиент не запущен")
+    async def send(self, data, host=None, port=None):
+        """Send data to the UDP server.
+        
+        Args:
+            data: Data to send (must be bytes)
+            host: Host to send to (default: self._host)
+            port: Port to send to (default: self._port)
+            
+        Returns:
+            bool: True if message was sent, False otherwise
+        """
+        if not isinstance(data, bytes):
+            _LOGGER.error("Данные для отправки должны быть в формате bytes")
             return False
             
+        if not self._transport:
+            await self.start()
+            if not self._transport:
+                _LOGGER.error(f"Невозможно отправить данные: транспорт не инициализирован")
+                return False
+                
         try:
-            target_host = host or self.target_host or "255.255.255.255"
-            target_port = port or self.target_port or 6000
+            target_host = host or self._host
+            target_port = port or self._port
             
-            self.transport.sendto(data, (target_host, target_port))
-            _LOGGER.debug(f"Отправлены данные на {target_host}:{target_port}: {binascii.hexlify(data).decode()}")
+            _LOGGER.debug(f"Отправка UDP пакета на {target_host}:{target_port}, размер {len(data)} байт")
+            
+            # Отправляем данные
+            self._transport.sendto(data, (target_host, target_port))
+            
+            # Добавляем небольшую задержку, чтобы не перегружать сеть
+            await asyncio.sleep(0.05)
+            
             return True
-            
-        except Exception as e:
-            _LOGGER.error(f"Ошибка при отправке данных: {e}")
+        except (OSError, asyncio.TimeoutError) as exc:
+            _LOGGER.error(f"Ошибка сети при отправке данных на {host}:{port}: {exc}")
+            return False
+        except Exception as exc:
+            _LOGGER.error(f"Непредвиденная ошибка при отправке данных: {exc}")
             import traceback
             _LOGGER.error(traceback.format_exc())
             return False
@@ -113,8 +136,8 @@ class UDPClient:
             # Отправляем буфер
             return await self.send(
                 send_buffer,
-                host=self.target_host,
-                port=self.target_port
+                host=self._host,
+                port=self._port
             )
         except Exception as e:
             _LOGGER.error(f"Ошибка при отправке сообщения через UDP: {e}")

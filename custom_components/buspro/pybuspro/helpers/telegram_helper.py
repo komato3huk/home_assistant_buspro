@@ -147,6 +147,35 @@ class TelegramHelper:
             telegram.source_device_type = DeviceType.PyBusPro
         return telegram
 
+    def calculate_crc(self, buffer: bytearray, method: str = "simple") -> int:
+        """Calculate CRC for buffer.
+        
+        Args:
+            buffer: Buffer to calculate CRC for
+            method: Method to use for CRC calculation ("simple" or "crc16")
+            
+        Returns:
+            int: CRC value
+        """
+        if method == "crc16":
+            return self._crc16(buffer)
+        else:
+            return self._calculate_crc(buffer)
+
+    def _calculate_crc(self, buffer: bytearray) -> int:
+        """Calculate simple CRC for buffer (sum of bytes).
+        
+        Args:
+            buffer: Buffer to calculate CRC for
+            
+        Returns:
+            int: CRC value
+        """
+        crc = 0
+        for byte in buffer:
+            crc += byte
+        return crc & 0xFF
+
     def build_send_buffer(self, telegram: Dict[str, Any]) -> bytes:
         """Build send buffer from telegram dictionary.
         
@@ -175,6 +204,17 @@ class TelegramHelper:
             target_subnet_id = telegram.get("target_subnet_id")
             target_device_id = telegram.get("target_device_id")
             data = telegram.get("data", [])
+            
+            # Убедимся что все значения - целые числа
+            try:
+                source_subnet_id = int(source_subnet_id)
+                source_device_id = int(source_device_id)
+                operate_code = int(operate_code)
+                target_subnet_id = int(target_subnet_id)
+                target_device_id = int(target_device_id)
+            except (TypeError, ValueError) as e:
+                _LOGGER.error(f"Ошибка преобразования значений в целые числа: {e}")
+                return None
             
             # Проверяем, что data - это список
             if not isinstance(data, list):
@@ -227,20 +267,6 @@ class TelegramHelper:
             _LOGGER.error(traceback.format_exc())
             return None
             
-    def _calculate_crc(self, buffer: bytearray) -> int:
-        """Calculate CRC for buffer.
-        
-        Args:
-            buffer: Buffer to calculate CRC for
-            
-        Returns:
-            int: CRC value
-        """
-        crc = 0
-        for i in range(len(buffer)):
-            crc += buffer[i]
-        return crc & 0xFF
-
     def _calculate_crc_from_telegram(self, telegram):
         length_of_data_package = 11 + len(telegram.payload)
         crc_buf_length = length_of_data_package - 2
@@ -277,72 +303,3 @@ class TelegramHelper:
             reg &= 0xFFFF
             # reflect out
         return reg ^ xor_out
-        
-    def calculate_crc(self, data, method="simple"):
-        """Calculate CRC based on method.
-        
-        Args:
-            data: Data to calculate CRC for (bytearray, bytes, telegram)
-            method: CRC method to use ("simple", "crc16", "telegram")
-            
-        Returns:
-            CRC value according to selected method
-        """
-        if method == "simple":
-            # Простой алгоритм суммирования байтов
-            if isinstance(data, (bytearray, bytes, list)):
-                crc = 0
-                for i in range(len(data)):
-                    crc += data[i]
-                return crc & 0xFF
-            else:
-                _LOGGER.error(f"Неподдерживаемый тип данных для CRC simple: {type(data)}")
-                return 0
-                
-        elif method == "crc16":
-            # Алгоритм CRC16 для более сложных проверок
-            if isinstance(data, (bytearray, bytes)):
-                data_bytes = data
-            elif isinstance(data, list):
-                data_bytes = bytes(data)
-            else:
-                _LOGGER.error(f"Неподдерживаемый тип данных для CRC16: {type(data)}")
-                return 0
-                
-            xor_in = 0x0000  # initial value
-            xor_out = 0x0000  # final XOR value
-            poly = 0x1021    # generator polinom (normal form)
-        
-            reg = xor_in
-            for octet in data_bytes:
-                # reflect in
-                for i in range(8):
-                    topbit = reg & 0x8000
-                    if octet & (0x80 >> i):
-                        topbit ^= 0x8000
-                    reg <<= 1
-                    if topbit:
-                        reg ^= poly
-                reg &= 0xFFFF
-                # reflect out
-            return reg ^ xor_out
-            
-        elif method == "telegram":
-            # Специализированный CRC для телеграмм
-            if not hasattr(data, 'payload') or not hasattr(data, 'udp_data'):
-                _LOGGER.error(f"Данные не являются объектом telegram: {data}")
-                return 0
-                
-            length_of_data_package = 11 + len(data.payload)
-            crc_buf_length = length_of_data_package - 2
-            send_buf = data.udp_data[:-2]
-            crc_buf = send_buf[-crc_buf_length:]
-            crc_buf_as_bytes = bytes(crc_buf)
-            
-            # Используем CRC16 для вычисления
-            crc = self.calculate_crc(crc_buf_as_bytes, method="crc16")
-            return pack(">H", crc)
-            
-        else:
-            _LOGGER.error(f"Неподдерживаемый метод CRC: {method}")
-            return 0
